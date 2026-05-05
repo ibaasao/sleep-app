@@ -1,0 +1,14 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: #0c1222;
+  --foreground: #e8ecf4;
+}
+
+body {
+  color: var(--foreground);
+  background: radial-gradient(ellipse at top, #1a2744 0%, var(--background) 55%);
+  min-height: 100dvh;
+}
