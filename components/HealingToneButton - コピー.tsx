@@ -130,14 +130,7 @@ const SOUND_LIST: Sound[] = [
     description: '落ち着く雨の音', 
     audioUrl: 'https://lnllkcuiwiuppeaobhxs.supabase.co/storage/v1/object/public/sounds/rain.mp3',
   },
-  // ★追加ここから
-  {
-    id: "n7",
-    type: "sleep",
-    label: "Solstice Breath",
-    freq: 528,
-    description: "13秒周期で呼吸するように変化する528Hz",
-  },
+
 ];
 
 /** sleep_logs.notes に保存する JSON（Supabase では jsonb） */
@@ -241,11 +234,7 @@ export function HealingToneButton() {
   const noiseFilterRef = useRef<Tone.Filter | null>(null);
   /** Deep Ocean 用のゆっくり開閉する AutoFilter */
   const oceanAutoFilterRef = useRef<Tone.AutoFilter | null>(null);
-  // ★追加ここから
-  /** からくりトリック用の音量揺らし LFO */
-  const lfoRef = useRef<Tone.LFO | null>(null);
-  // ★追加ここまで
-  // /** Delta / Theta 用ローパス（左右） */
+  /** Delta / Theta 用ローパス（左右） */
   const binauralFilterLRef = useRef<Tone.Filter | null>(null);
   const binauralFilterRRef = useRef<Tone.Filter | null>(null);
   const fadeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -318,13 +307,6 @@ export function HealingToneButton() {
       oceanAutoFilterRef.current.dispose();
       oceanAutoFilterRef.current = null;
     }
-    // ★追加ここから
-    if (lfoRef.current) {
-      lfoRef.current.stop();
-      lfoRef.current.dispose();
-      lfoRef.current = null;
-    }
-    // ★追加ここまで
     if (noiseFilterRef.current) {
       noiseFilterRef.current.dispose();
       noiseFilterRef.current = null;
@@ -448,21 +430,6 @@ export function HealingToneButton() {
       sourceRef.current = oscA;
       secondOscRef.current = oscB;
       thirdOscRef.current = oscC;
-    } else if (currentSound.id === "n7") {
-      // 528Hzをベースに、LFOで音量を13秒周期で動かす
-      const osc = new Tone.Oscillator(currentSound.freq!, "sine").connect(reverb);
-      
-      const lfo = new Tone.LFO({
-        frequency: 1 / 13,
-        min: -60, // ほぼ聞こえないレベル
-        max: -15, // はっきり聞こえるレベル
-        type: "sine"
-      }).connect(osc.volume);
-
-      lfo.start();
-      sourceRef.current = osc;
-      lfoRef.current = lfo;
-    // ★追加ここまで
     } else if (currentSound.id === "n3" || currentSound.id === "n4") {
       // 左右パンを最大に広げ、各チャンネルを 200Hz ローパスして「ザー」感を抑える。
       const pannerL = new Tone.Panner(-1).connect(reverb);
@@ -498,7 +465,7 @@ export function HealingToneButton() {
       osc.volume.value = -14;
       const depth = new Tone.Oscillator(
         f + DEPTH_DETUNE_HZ,
-        "sine",
+        "triangle",
       ).connect(reverb);
       depth.volume.value = -17;
       sourceRef.current = osc;
