@@ -230,8 +230,6 @@ export function HealingToneButton() {
   const [minutes, setMinutes] = useState<TimerMinutes>(30);
   const [remainingSec, setRemainingSec] = useState<number | null>(null);
   const [history, setHistory] = useState<SleepLogRow[]>([]);
-  const [oscType, setOscType] = useState<Tone.ToneOscillatorType>("sine");
-  const [modType, setModType] = useState<"none" | "breathe" | "vibrate">("none");
 
   const sourceRef = useRef<Tone.Oscillator | Tone.Noise | null>(null);
   const secondOscRef = useRef<Tone.Oscillator | null>(null);
@@ -429,34 +427,6 @@ export function HealingToneButton() {
         noise.volume.value = -20;
         sourceRef.current = noise;
         noiseFilterRef.current = lp;
-      } else if (currentSound.id === "s3") {
-        const f = 528;
-        // ★ 追加した oscType（波形）を使用する
-        const osc = new Tone.Oscillator(f, oscType).connect(reverb);
-        osc.volume.value = -14;
-      
-        // ★ 追加した modType（ゆらぎ）に応じて LFO を接続する
-        if (modType === "breathe") {
-          const lfo = new Tone.LFO({
-            frequency: 1 / 13, 
-            min: -50, 
-            max: -14, 
-            type: "sine"
-          }).connect(osc.volume);
-          lfo.start();
-          lfoRef.current = lfo;
-        } else if (modType === "vibrate") {
-          const lfo = new Tone.LFO({
-            frequency: 4, 
-            min: -15, 
-            max: 15, 
-            type: "sine"
-          }).connect(osc.detune);
-          lfo.start();
-          lfoRef.current = lfo;
-        }
-      
-        sourceRef.current = osc;
       } else {
         const noise = new Tone.Noise(currentSound.noiseType).connect(reverb);
         noise.volume.value = -20;
@@ -611,69 +581,20 @@ export function HealingToneButton() {
         </aside>
 
         <main className="flex min-h-0 flex-1 flex-col p-6">
-        <header className="mb-4 flex items-end justify-between gap-4">
-  <div className="flex items-center gap-6">
-    <h1 className="text-xl font-bold">Sound Library</h1>
+          <header className="mb-4 flex items-start justify-between gap-4">
+            <h1 className="text-xl font-bold">Sound Library</h1>
+            {playing && remainingSec !== null && (
+              <div className="text-right">
+                <p className="animate-pulse text-[10px] uppercase text-violet-400">
+                  Now Playing
+                </p>
+                <p className="font-mono text-lg tabular-nums">
+                  {formatRemaining(remainingSec)}
+                </p>
+              </div>
+            )}
+          </header>
 
-    {/* ★ 528Hz (s3) が選ばれていて、かつ再生中でない時に表示 */}
-    {selectedId === "s3" && !playing && (
-      <div className="flex items-center gap-4 rounded-full bg-slate-900/80 px-4 py-1.5 border border-slate-800 shadow-inner">
-        <div className="flex items-center gap-2">
-          <span className="text-[10px] font-bold text-slate-500 uppercase tracking-tighter">音色:</span>
-          <div className="flex gap-2">
-            {["sine", "triangle"].map((t) => (
-              <label key={t} className="flex items-center gap-1 cursor-pointer group">
-                <input
-                  type="radio"
-                  name="oscType"
-                  className="w-3 h-3 accent-violet-500 cursor-pointer"
-                  checked={oscType === t}
-                  onChange={() => setOscType(t as any)}
-                />
-                <span className={`text-xs ${oscType === t ? "text-violet-400 font-bold" : "text-slate-500 group-hover:text-slate-300"}`}>
-                  {t === "sine" ? "Pure" : "Mild"}
-                </span>
-              </label>
-            ))}
-          </div>
-        </div>
-
-        <div className="w-[1px] h-3 bg-slate-800" />
-
-        <div className="flex items-center gap-2">
-          <span className="text-[10px] font-bold text-slate-500 uppercase tracking-tighter">ゆらぎ:</span>
-          <div className="flex gap-3">
-            {[
-              { id: "none", label: "Off" },
-              { id: "breathe", label: "Breathe" },
-              { id: "vibrate", label: "Vibrate" }
-            ].map((m) => (
-              <label key={m.id} className="flex items-center gap-1 cursor-pointer group">
-                <input
-                  type="radio"
-                  name="modType"
-                  className="w-3 h-3 accent-violet-500 cursor-pointer"
-                  checked={modType === m.id}
-                  onChange={() => setModType(m.id as any)}
-                />
-                <span className={`text-xs ${modType === m.id ? "text-violet-400 font-bold" : "text-slate-500 group-hover:text-slate-300"}`}>
-                  {m.label}
-                </span>
-              </label>
-            ))}
-          </div>
-        </div>
-      </div>
-    )}
-  </div>
-
-  {playing && remainingSec !== null && (
-    <div className="text-right">
-      <p className="animate-pulse text-[10px] uppercase text-violet-400">Now Playing</p>
-      <p className="font-mono text-lg tabular-nums">{formatRemaining(remainingSec)}</p>
-    </div>
-  )}
-</header>
           <div className="grid min-h-0 flex-1 grid-cols-2 content-start gap-3 overflow-y-auto pb-4">
             {SOUND_LIST.map((s) => (
               <button
