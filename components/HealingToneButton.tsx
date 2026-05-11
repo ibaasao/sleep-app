@@ -663,20 +663,20 @@ export function HealingToneButton() {
   };
 
   return (
-    <div className="flex h-auto min-h-[600px] w-full max-w-5xl flex-col rounded-xl border border-slate-800 bg-[#0a0a0a] text-slate-200 shadow-2xl">
-      <div className="flex min-h-0 flex-1">
-        <aside className="w-60 shrink-0 border-r border-slate-800 bg-[#0f0f0f] p-6">
-          <h2 className="mb-4 text-xs font-semibold uppercase tracking-widest text-slate-500">
+    <div className="flex h-auto w-full max-w-5xl flex-col rounded-xl border border-slate-800 bg-[#0a0a0a] text-slate-200 shadow-2xl md:min-h-[600px]">
+      <div className="flex min-h-0 flex-1 flex-col md:flex-row">
+        <aside className="w-full shrink-0 border-b border-slate-800 bg-[#0f0f0f] p-4 md:w-60 md:border-b-0 md:border-r md:p-6">
+          <h2 className="mb-3 text-xs font-semibold uppercase tracking-widest text-slate-500 md:mb-4">
             Timer
           </h2>
-          <div className="flex flex-col gap-2">
+          <div className="grid grid-cols-3 gap-2 md:flex md:flex-col">
             {TIMER_OPTIONS.map((m) => (
               <button
                 key={m}
                 type="button"
                 disabled={playing}
                 onClick={() => setMinutes(m)}
-                className={`rounded-lg px-3 py-2 text-left text-sm transition ${
+                className={`rounded-lg px-3 py-2 text-center text-sm transition md:text-left ${
                   minutes === m
                     ? "bg-violet-500/20 text-violet-400 ring-1 ring-violet-500/50"
                     : "text-slate-400 hover:bg-slate-800"
@@ -688,16 +688,16 @@ export function HealingToneButton() {
           </div>
         </aside>
 
-        <main className="flex min-h-0 flex-1 flex-col p-6">
-        <header className="mb-4 flex items-end justify-between gap-4">
-  <div className="flex items-center gap-6">
-    <h1 className="text-xl font-bold">Sound Library</h1>
+        <main className="flex min-h-0 min-w-0 flex-1 flex-col p-4 sm:p-6">
+        <header className="mb-4 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+  <div className="flex w-full min-w-0 flex-col gap-3 lg:flex-row lg:items-center lg:gap-6">
+    <h1 className="shrink-0 text-lg font-bold sm:text-xl">Sound Library</h1>
 
     {/* ★ 528Hz (s3) が選ばれていて、かつ再生中でない時に表示 */}
     {selectedId === "s3" && !playing && (
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-full bg-slate-900/80 px-4 py-1.5 border border-slate-800 shadow-inner">
+      <div className="flex w-full min-w-0 flex-col gap-3 rounded-2xl border border-slate-800 bg-slate-900/80 px-3 py-3 shadow-inner sm:flex-row sm:flex-wrap sm:items-center sm:gap-x-4 sm:gap-y-2 sm:rounded-full sm:px-4 sm:py-1.5">
         <div
-          className="flex items-center gap-2"
+          className="flex flex-wrap items-center gap-x-2 gap-y-1"
           title={
             isNeuralSync
               ? "Neural Synchronizer ON でも音色を変更できます"
@@ -731,7 +731,7 @@ export function HealingToneButton() {
         <div className="hidden h-3 w-px shrink-0 bg-slate-800 sm:block" />
 
         <div
-          className="flex items-center gap-2"
+          className="flex flex-wrap items-center gap-x-2 gap-y-1"
           title={
             isNeuralSync
               ? "Neural Synchronizer ON でもゆらぎを変更できます"
@@ -768,8 +768,8 @@ export function HealingToneButton() {
 
         <div className="hidden h-3 w-px shrink-0 bg-slate-800 sm:block" />
 
-        <div className="flex items-center gap-2">
-          <span className="shrink-0 text-[9px] font-bold uppercase leading-tight tracking-tight text-slate-500">
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+          <span className="shrink-0 text-[9px] font-bold uppercase leading-tight tracking-tight text-slate-500 sm:max-w-none">
             Neural Synchronizer
           </span>
           <div className="flex gap-3">
@@ -799,20 +799,20 @@ export function HealingToneButton() {
   </div>
 
   {playing && remainingSec !== null && (
-    <div className="text-right">
+    <div className="shrink-0 text-left sm:text-right">
       <p className="animate-pulse text-[10px] uppercase text-violet-400">Now Playing</p>
       <p className="font-mono text-lg tabular-nums">{formatRemaining(remainingSec)}</p>
     </div>
   )}
 </header>
-          <div className="grid min-h-0 flex-1 grid-cols-2 content-start gap-3 overflow-y-auto pb-4">
+          <div className="grid min-h-0 flex-1 grid-cols-1 content-start gap-3 overflow-y-auto pb-4 min-[420px]:grid-cols-2">
             {SOUND_LIST.map((s) => (
               <button
                 key={s.id}
                 type="button"
                 onClick={() => !playing && setSelectedId(s.id)}
                 disabled={playing}
-                className={`rounded-lg border p-4 text-left transition disabled:cursor-not-allowed ${
+                className={`rounded-lg border p-3 text-left transition disabled:cursor-not-allowed sm:p-4 ${
                   selectedId === s.id
                     ? "border-violet-500 bg-violet-500/5"
                     : "border-slate-800 bg-slate-900/30 hover:border-slate-700"
@@ -835,7 +835,7 @@ export function HealingToneButton() {
                   return (
                     <div
                       key={log.id}
-                      className="flex items-center justify-between gap-3 rounded-md border border-slate-800/50 bg-slate-900/50 p-3"
+                      className="flex flex-col gap-1 rounded-md border border-slate-800/50 bg-slate-900/50 p-3 sm:flex-row sm:items-center sm:justify-between sm:gap-3"
                     >
                       <div className="min-w-0 flex-1">
                         <p className="truncate text-sm font-medium text-slate-200">
@@ -866,7 +866,7 @@ export function HealingToneButton() {
         </main>
       </div>
 
-      <footer className="border-t border-slate-800 bg-[#0f0f0f] p-6">
+      <footer className="border-t border-slate-800 bg-[#0f0f0f] p-4 sm:p-6">
         <button
           type="button"
           onClick={() => void (playing ? stopPlayback() : startPlayback())}
