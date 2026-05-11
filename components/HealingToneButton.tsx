@@ -17,6 +17,10 @@ const PINK_NOISE_LPF_HZ = 1000;
 const DEEP_OCEAN_LPF_HZ = 400;
 /** Deep Ocean の AutoFilter 周期（秒） */
 const DEEP_OCEAN_SWELL_SEC = 15;
+/** Neural Synchronizer（528Hz 選択時）左耳の周波数 */
+const NEURAL_SYNC_LEFT_HZ = 528;
+/** 右耳は覚醒用に +20Hz */
+const NEURAL_SYNC_RIGHT_HZ = 548;
 
 /** ルーム残響のウェット量（ドライとのバランス） */
 const REVERB_WET = 0.4;
@@ -232,6 +236,8 @@ export function HealingToneButton() {
   const [history, setHistory] = useState<SleepLogRow[]>([]);
   const [oscType, setOscType] = useState<Tone.ToneOscillatorType>("sine");
   const [modType, setModType] = useState<"none" | "breathe" | "vibrate">("none");
+  /** 528Hz（s3）選択時のみ有効な左右独立モード */
+  const [isNeuralSync, setIsNeuralSync] = useState(false);
 
   const sourceRef = useRef<Tone.Oscillator | Tone.Noise | null>(null);
   const secondOscRef = useRef<Tone.Oscillator | null>(null);
@@ -250,12 +256,21 @@ export function HealingToneButton() {
   // /** Delta / Theta 用ローパス（左右） */
   const binauralFilterLRef = useRef<Tone.Filter | null>(null);
   const binauralFilterRRef = useRef<Tone.Filter | null>(null);
+  /** Neural Synchronizer 用パンナー（左右） */
+  const neuralPannerLRef = useRef<Tone.Panner | null>(null);
+  const neuralPannerRRef = useRef<Tone.Panner | null>(null);
   const fadeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const stopScheduleRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const endAtRef = useRef<number>(0);
 
   const currentSound =
     SOUND_LIST.find((s) => s.id === selectedId) || SOUND_LIST[2];
+
+  useEffect(() => {
+    if (selectedId !== "s3") {
+      setIsNeuralSync(false);
+    }
+  }, [selectedId]);
 
   const fetchHistory = useCallback(async () => {
     const supabase = createClient();
@@ -338,6 +353,14 @@ export function HealingToneButton() {
     if (binauralFilterRRef.current) {
       binauralFilterRRef.current.dispose();
       binauralFilterRRef.current = null;
+    }
+    if (neuralPannerLRef.current) {
+      neuralPannerLRef.current.dispose();
+      neuralPannerLRef.current = null;
+    }
+    if (neuralPannerRRef.current) {
+      neuralPannerRRef.current.dispose();
+      neuralPannerRRef.current = null;
     }
     if (reverbRef.current) {
       reverbRef.current.dispose();
@@ -429,38 +452,84 @@ export function HealingToneButton() {
         noise.volume.value = -20;
         sourceRef.current = noise;
         noiseFilterRef.current = lp;
-      } else if (currentSound.id === "s3") {
-        const f = 528;
-        // ★ 追加した oscType（波形）を使用する
-        const osc = new Tone.Oscillator(f, oscType).connect(reverb);
-        osc.volume.value = -14;
-      
-        // ★ 追加した modType（ゆらぎ）に応じて LFO を接続する
+      } else {
+        const noise = new Tone.Noise(currentSound.noiseType).connect(reverb);
+        noise.volume.value = -20;
+        sourceRef.current = noise;
+      }
+    } else if (currentSound.id === "s3") {
+      if (isNeuralSync) {
+        const pannerL = new Tone.Panner(-1).connect(reverb);
+        const pannerR = new Tone.Panner(1).connect(reverb);
+        neuralPannerLRef.current = pannerL;
+        neuralPannerRRef.current = pannerR;
+
+        const oscL = new Tone.Oscillator(NEURAL_SYNC_LEFT_HZ, oscType).connect(
+          pannerL,
+        );
+        const oscR = new Tone.Oscillator(NEURAL_SYNC_RIGHT_HZ, oscType).connect(
+          pannerR,
+        );
+        oscL.volume.value = -14;
+        oscR.volume.value = -14;
+        sourceRef.current = oscL;
+        secondOscRef.current = oscR;
+
         if (modType === "breathe") {
           const lfo = new Tone.LFO({
-            frequency: 1 / 13, 
-            min: -50, 
-            max: -14, 
-            type: "sine"
+            frequency: 1 / 13,
+            min: -50,
+            max: -14,
+            type: "sine",
+          });
+          lfo.connect(oscL.volume);
+          lfo.connect(oscR.volume);
+          lfo.start();
+          lfoRef.current = lfo;
+        } else if (modType === "vibrate") {
+          const lfo = new Tone.LFO({
+            frequency: 4,
+            min: -15,
+            max: 15,
+            type: "sine",
+          });
+          lfo.connect(oscL.detune);
+          lfo.connect(oscR.detune);
+          lfo.start();
+          lfoRef.current = lfo;
+        }
+      } else {
+        const f = currentSound.freq!;
+        const osc = new Tone.Oscillator(f, oscType).connect(reverb);
+        osc.volume.value = -14;
+
+        if (modType === "breathe") {
+          const lfo = new Tone.LFO({
+            frequency: 1 / 13,
+            min: -50,
+            max: -14,
+            type: "sine",
           }).connect(osc.volume);
           lfo.start();
           lfoRef.current = lfo;
         } else if (modType === "vibrate") {
           const lfo = new Tone.LFO({
-            frequency: 4, 
-            min: -15, 
-            max: 15, 
-            type: "sine"
+            frequency: 4,
+            min: -15,
+            max: 15,
+            type: "sine",
           }).connect(osc.detune);
           lfo.start();
           lfoRef.current = lfo;
         }
-      
+
         sourceRef.current = osc;
-      } else {
-        const noise = new Tone.Noise(currentSound.noiseType).connect(reverb);
-        noise.volume.value = -20;
-        sourceRef.current = noise;
+        const depth = new Tone.Oscillator(
+          f + DEPTH_DETUNE_HZ,
+          "sine",
+        ).connect(reverb);
+        depth.volume.value = -17;
+        depthOscRef.current = depth;
       }
     } else if (currentSound.id === "n6") {
       // 528Hz（愛）/ 432Hz（宇宙）/ 63.3Hz（地球の鼓動）を
@@ -553,7 +622,16 @@ export function HealingToneButton() {
     stopScheduleRef.current = setTimeout(() => {
       beginFadeOut();
     }, waitMs);
-  }, [currentSound, minutes, beginFadeOut, clearTimers, disposeSources]);
+  }, [
+    currentSound,
+    minutes,
+    beginFadeOut,
+    clearTimers,
+    disposeSources,
+    isNeuralSync,
+    modType,
+    oscType,
+  ]);
 
   useEffect(() => {
     if (!playing) return;
@@ -617,20 +695,32 @@ export function HealingToneButton() {
 
     {/* ★ 528Hz (s3) が選ばれていて、かつ再生中でない時に表示 */}
     {selectedId === "s3" && !playing && (
-      <div className="flex items-center gap-4 rounded-full bg-slate-900/80 px-4 py-1.5 border border-slate-800 shadow-inner">
-        <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-full bg-slate-900/80 px-4 py-1.5 border border-slate-800 shadow-inner">
+        <div
+          className="flex items-center gap-2"
+          title={
+            isNeuralSync
+              ? "Neural Synchronizer ON でも音色を変更できます"
+              : undefined
+          }
+        >
           <span className="text-[10px] font-bold text-slate-500 uppercase tracking-tighter">音色:</span>
           <div className="flex gap-2">
             {["sine", "triangle"].map((t) => (
-              <label key={t} className="flex items-center gap-1 cursor-pointer group">
+              <label
+                key={t}
+                className="flex cursor-pointer items-center gap-1 group"
+              >
                 <input
                   type="radio"
                   name="oscType"
-                  className="w-3 h-3 accent-violet-500 cursor-pointer"
+                  className="h-3 w-3 cursor-pointer accent-violet-500"
                   checked={oscType === t}
-                  onChange={() => setOscType(t as any)}
+                  onChange={() => setOscType(t as Tone.ToneOscillatorType)}
                 />
-                <span className={`text-xs ${oscType === t ? "text-violet-400 font-bold" : "text-slate-500 group-hover:text-slate-300"}`}>
+                <span
+                  className={`text-xs ${oscType === t ? "font-bold text-violet-400" : "text-slate-400 group-hover:text-slate-200"}`}
+                >
                   {t === "sine" ? "Pure" : "Mild"}
                 </span>
               </label>
@@ -638,9 +728,16 @@ export function HealingToneButton() {
           </div>
         </div>
 
-        <div className="w-[1px] h-3 bg-slate-800" />
+        <div className="hidden h-3 w-px shrink-0 bg-slate-800 sm:block" />
 
-        <div className="flex items-center gap-2">
+        <div
+          className="flex items-center gap-2"
+          title={
+            isNeuralSync
+              ? "Neural Synchronizer ON でもゆらぎを変更できます"
+              : undefined
+          }
+        >
           <span className="text-[10px] font-bold text-slate-500 uppercase tracking-tighter">ゆらぎ:</span>
           <div className="flex gap-3">
             {[
@@ -648,16 +745,50 @@ export function HealingToneButton() {
               { id: "breathe", label: "Breathe" },
               { id: "vibrate", label: "Vibrate" }
             ].map((m) => (
-              <label key={m.id} className="flex items-center gap-1 cursor-pointer group">
+              <label
+                key={m.id}
+                className="flex cursor-pointer items-center gap-1 group"
+              >
                 <input
                   type="radio"
                   name="modType"
-                  className="w-3 h-3 accent-violet-500 cursor-pointer"
+                  className="h-3 w-3 cursor-pointer accent-violet-500"
                   checked={modType === m.id}
-                  onChange={() => setModType(m.id as any)}
+                  onChange={() => setModType(m.id as "none" | "breathe" | "vibrate")}
                 />
-                <span className={`text-xs ${modType === m.id ? "text-violet-400 font-bold" : "text-slate-500 group-hover:text-slate-300"}`}>
+                <span
+                  className={`text-xs ${modType === m.id ? "font-bold text-violet-400" : "text-slate-400 group-hover:text-slate-200"}`}
+                >
                   {m.label}
+                </span>
+              </label>
+            ))}
+          </div>
+        </div>
+
+        <div className="hidden h-3 w-px shrink-0 bg-slate-800 sm:block" />
+
+        <div className="flex items-center gap-2">
+          <span className="shrink-0 text-[9px] font-bold uppercase leading-tight tracking-tight text-slate-500">
+            Neural Synchronizer
+          </span>
+          <div className="flex gap-3">
+            {[
+              { value: false, label: "OFF" },
+              { value: true, label: "ON" },
+            ].map((o) => (
+              <label key={String(o.value)} className="flex cursor-pointer items-center gap-1 group">
+                <input
+                  type="radio"
+                  name="neuralSync"
+                  className="h-3 w-3 cursor-pointer accent-violet-500"
+                  checked={isNeuralSync === o.value}
+                  onChange={() => setIsNeuralSync(o.value)}
+                />
+                <span
+                  className={`text-xs ${isNeuralSync === o.value ? "font-bold text-violet-400" : "text-slate-500 group-hover:text-slate-300"}`}
+                >
+                  {o.label}
                 </span>
               </label>
             ))}
