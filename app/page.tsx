@@ -1,4 +1,3 @@
-import { AuthNav } from "@/components/AuthNav";
 import { HealingToneButton } from "@/components/HealingToneButton";
 import { createClient } from "@/lib/supabase/server";
 
@@ -9,8 +8,8 @@ export default async function Home() {
   } = await supabase.auth.getUser();
 
   return (
-    <main className="flex min-h-dvh w-full flex-col items-center justify-center gap-6 px-4 py-8 sm:gap-10 sm:px-6 sm:py-16">
-      <div className="w-full max-w-md text-center">
+    <main className="relative z-10 flex min-h-dvh w-full flex-col items-center justify-center gap-6 px-4 py-8 sm:gap-10 sm:px-6 sm:py-16">
+      <div className="session-intro w-full max-w-md text-center">
         <p className="text-xs font-medium uppercase tracking-[0.2em] text-slate-400 sm:text-sm">
           sleep sound
         </p>
@@ -20,11 +19,8 @@ export default async function Home() {
         <p className="mt-4 text-sm leading-relaxed text-slate-300 sm:text-base">
           オフタイマーと再生ボタンで、時間が来ると音がフェードアウトして止まります。初回はブラウザの許可で音声が有効になります。ログインすると再生開始が記録されます。
         </p>
-        <div className="mt-6 flex justify-center">
-          <AuthNav email={user?.email ?? null} />
-        </div>
       </div>
-      <HealingToneButton />
+      <HealingToneButton email={user?.email ?? null} />
     </main>
   );
 }

@@ -12,3 +12,29 @@ body {
   background: radial-gradient(ellipse at top, #1a2744 0%, var(--background) 55%);
   min-height: 100dvh;
 }
+
+html.session-focus .session-intro {
+  opacity: 0.12;
+  transform: translateY(-10px) scale(0.98);
+  max-height: 0;
+  margin: 0;
+  overflow: hidden;
+  pointer-events: none;
+  transition:
+    opacity 0.7s ease,
+    transform 0.7s ease,
+    max-height 0.7s ease;
+}
+
+html.session-lock-focus .session-intro {
+  opacity: 0;
+  max-height: 0;
+  margin: 0;
+}
+
+.session-intro {
+  transition:
+    opacity 0.7s ease,
+    transform 0.7s ease,
+    max-height 0.7s ease;
+}

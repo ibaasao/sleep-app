@@ -1,7 +1,22 @@
 "use client";
 
 import { createClient } from "@/lib/supabase/client";
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
+import { AuthNav } from "@/components/AuthNav";
+import { HiddenSignalLayer } from "@/components/session/HiddenSignalLayer";
+import { NeuralScanHud } from "@/components/session/NeuralScanHud";
+import { NeuralSynapseVisualizer } from "@/components/session/NeuralSynapseVisualizer";
+import { SessionAmbientField } from "@/components/session/SessionAmbientField";
+import { SessionLaunchBurst } from "@/components/session/SessionLaunchBurst";
+import { SyncLockFlash } from "@/components/session/SyncLockFlash";
+import { motion } from "framer-motion";
 import * as Tone from "tone";
 
 const FADE_SECONDS = 8;
@@ -228,7 +243,39 @@ async function recordSleepLogAtPlay(
   }
 }
 
-export function HealingToneButton() {
+type SessionControlValue = {
+  playing: boolean;
+  toggleSession: () => void;
+};
+
+const SessionControlContext = createContext<SessionControlValue | null>(null);
+
+function SessionControlButton() {
+  const session = useContext(SessionControlContext);
+  if (!session) return null;
+
+  const { playing, toggleSession } = session;
+
+  return (
+    <button
+      type="button"
+      onClick={() => void toggleSession()}
+      className={`rounded-full px-4 py-1.5 text-sm font-bold tracking-wider transition ${
+        playing
+          ? "bg-red-500/10 text-red-500 ring-1 ring-red-500/30 hover:bg-red-500/20"
+          : "bg-violet-600 text-white ring-1 ring-violet-500/40 hover:bg-violet-500"
+      }`}
+    >
+      {playing ? "STOP SESSION" : "START SESSION"}
+    </button>
+  );
+}
+
+type HealingToneButtonProps = {
+  email: string | null;
+};
+
+export function HealingToneButton({ email }: HealingToneButtonProps) {
   const [playing, setPlaying] = useState(false);
   const [selectedId, setSelectedId] = useState<string>("s3");
   const [minutes, setMinutes] = useState<TimerMinutes>(30);
@@ -238,6 +285,10 @@ export function HealingToneButton() {
   const [modType, setModType] = useState<"none" | "breathe" | "vibrate">("none");
   /** 528Hz（s3）選択時のみ有効な左右独立モード */
   const [isNeuralSync, setIsNeuralSync] = useState(false);
+  const [launchBurst, setLaunchBurst] = useState(false);
+  const [alignmentBurstAt, setAlignmentBurstAt] = useState<number | null>(null);
+  const [syncLocked, setSyncLocked] = useState(false);
+  const lockSilenceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const sourceRef = useRef<Tone.Oscillator | Tone.Noise | null>(null);
   const secondOscRef = useRef<Tone.Oscillator | null>(null);
@@ -369,11 +420,17 @@ export function HealingToneButton() {
   }, []);
 
   const stopPlayback = useCallback(() => {
+    if (lockSilenceTimerRef.current != null) {
+      clearTimeout(lockSilenceTimerRef.current);
+      lockSilenceTimerRef.current = null;
+    }
     clearTimers();
     disposeSources();
     Tone.Destination.mute = true;
     setPlaying(false);
     setRemainingSec(null);
+    setSyncLocked(false);
+    setAlignmentBurstAt(null);
     void fetchHistory();
   }, [clearTimers, disposeSources, fetchHistory]);
 
@@ -393,6 +450,8 @@ export function HealingToneButton() {
       disposeSources();
       setPlaying(false);
       setRemainingSec(null);
+      setSyncLocked(false);
+      setAlignmentBurstAt(null);
       void fetchHistory();
     }, FADE_SECONDS * 1000 + 120);
   }, [clearTimers, disposeSources, fetchHistory]);
@@ -662,10 +721,134 @@ export function HealingToneButton() {
     return `${m}:${s.toString().padStart(2, "0")}`;
   };
 
+  const pauseSessionModulationForLock = useCallback(() => {
+    if (lfoRef.current) {
+      lfoRef.current.stop();
+      lfoRef.current.dispose();
+      lfoRef.current = null;
+    }
+
+    const voices = [
+      sourceRef.current,
+      secondOscRef.current,
+      thirdOscRef.current,
+      depthOscRef.current,
+    ].filter((voice): voice is Tone.Oscillator | Tone.Noise => voice != null);
+
+    if (voices.length === 0) return;
+
+    const preserved = voices.map((voice) => ({
+      voice,
+      level: voice.volume.value,
+    }));
+
+    for (const { voice } of preserved) {
+      voice.volume.cancelScheduledValues(Tone.now());
+      voice.volume.rampTo(-80, 0.04);
+    }
+
+    if (lockSilenceTimerRef.current != null) {
+      clearTimeout(lockSilenceTimerRef.current);
+    }
+
+    lockSilenceTimerRef.current = setTimeout(() => {
+      lockSilenceTimerRef.current = null;
+      for (const { voice, level } of preserved) {
+        const targetLevel =
+          currentSound.id === "n6" && voice === thirdOscRef.current
+            ? Math.min(level, -34)
+            : level;
+        voice.volume.rampTo(targetLevel, 0.35);
+      }
+    }, 120);
+  }, [currentSound.id]);
+
+  const toggleSession = useCallback(() => {
+    if (playing) {
+      setLaunchBurst(false);
+      setAlignmentBurstAt(null);
+      setSyncLocked(false);
+      void stopPlayback();
+      return;
+    }
+
+    setLaunchBurst(true);
+    setAlignmentBurstAt(null);
+    setSyncLocked(false);
+    void startPlayback();
+  }, [playing, startPlayback, stopPlayback]);
+
+  const handleSyncLocked = useCallback(() => {
+    setAlignmentBurstAt(performance.now());
+    setSyncLocked(true);
+    pauseSessionModulationForLock();
+  }, [pauseSessionModulationForLock]);
+
+  useEffect(() => {
+    document.documentElement.classList.toggle("session-focus", playing);
+    document.documentElement.classList.toggle("session-lock-focus", syncLocked);
+    return () => {
+      document.documentElement.classList.remove("session-focus");
+      document.documentElement.classList.remove("session-lock-focus");
+    };
+  }, [playing, syncLocked]);
+
+  useEffect(() => {
+    if (!launchBurst) return;
+
+    const timer = window.setTimeout(() => {
+      setLaunchBurst(false);
+    }, 1100);
+
+    return () => window.clearTimeout(timer);
+  }, [launchBurst]);
+
   return (
-    <div className="flex h-auto w-full max-w-5xl flex-col rounded-xl border border-slate-800 bg-[#0a0a0a] text-slate-200 shadow-2xl md:min-h-[600px]">
-      <div className="flex min-h-0 flex-1 flex-col md:flex-row">
-        <aside className="w-full shrink-0 border-b border-slate-800 bg-[#0f0f0f] p-4 md:w-60 md:border-b-0 md:border-r md:p-6">
+    <SessionControlContext.Provider value={{ playing, toggleSession }}>
+      <SessionAmbientField
+        active={playing}
+        soundId={selectedId}
+        alignmentBurstAt={alignmentBurstAt}
+        syncLocked={syncLocked}
+      />
+      <HiddenSignalLayer
+        active={playing}
+        soundId={selectedId}
+        syncLocked={syncLocked}
+      />
+      <SyncLockFlash burstAt={alignmentBurstAt} />
+      <SessionLaunchBurst active={launchBurst} />
+      <motion.div className="relative z-10 flex w-full max-w-5xl flex-col items-center gap-4">
+        <motion.div
+          className="flex flex-wrap items-center justify-center gap-3"
+          animate={{
+            opacity: syncLocked ? 0.2 : playing ? 0.45 : 1,
+            scale: playing ? 0.98 : 1,
+          }}
+          transition={{ duration: 0.45, ease: "easeOut" }}
+        >
+          <AuthNav email={email} />
+          <SessionControlButton />
+        </motion.div>
+        <motion.div
+          className={`relative flex h-auto w-full flex-col overflow-hidden rounded-xl border bg-[#0a0a0a] text-slate-200 shadow-2xl transition-colors duration-700 md:min-h-[600px] ${
+            playing ? "border-violet-500/25" : "border-slate-800"
+          }`}
+        >
+      <motion.div
+        className="flex min-h-0 flex-1 flex-col md:flex-row"
+        animate={{ opacity: playing ? 0.92 : 1 }}
+        transition={{ duration: 0.45, ease: "easeOut" }}
+      >
+        <aside
+          className={`w-full shrink-0 border-b border-slate-800 bg-[#0f0f0f] p-4 transition-all duration-500 md:w-60 md:border-b-0 md:border-r md:p-6 ${
+            syncLocked
+              ? "hidden"
+              : playing
+                ? "pointer-events-none opacity-30 md:w-44"
+                : ""
+          }`}
+        >
           <h2 className="mb-3 text-xs font-semibold uppercase tracking-widest text-slate-500 md:mb-4">
             Timer
           </h2>
@@ -688,9 +871,30 @@ export function HealingToneButton() {
           </div>
         </aside>
 
-        <main className="flex min-h-0 min-w-0 flex-1 flex-col p-4 sm:p-6">
+        <main
+          className={`relative z-10 flex min-h-0 min-w-0 flex-1 flex-col ${
+            syncLocked ? "p-6 sm:p-10" : "p-4 sm:p-6"
+          }`}
+        >
+        <NeuralScanHud
+          active={playing}
+          syncLocked={syncLocked}
+          onSyncLocked={handleSyncLocked}
+        />
+        <NeuralSynapseVisualizer
+          active={playing}
+          soundId={selectedId}
+          alignmentBurstAt={alignmentBurstAt}
+          syncLocked={syncLocked}
+        />
         <header className="mb-4 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-  <div className="flex w-full min-w-0 flex-col gap-3 lg:flex-row lg:items-center lg:gap-6">
+  <motion.div
+    className={`flex w-full min-w-0 flex-col gap-3 lg:flex-row lg:items-center lg:gap-6 ${
+      playing ? "hidden" : ""
+    }`}
+    animate={{ opacity: playing ? 0 : 1 }}
+    transition={{ duration: 0.45, ease: "easeOut" }}
+  >
     <h1 className="shrink-0 text-lg font-bold sm:text-xl">Sound Library</h1>
 
     {/* ★ 528Hz (s3) が選ばれていて、かつ再生中でない時に表示 */}
@@ -796,15 +1000,35 @@ export function HealingToneButton() {
         </div>
       </div>
     )}
-  </div>
+  </motion.div>
 
   {playing && remainingSec !== null && (
-    <div className="shrink-0 text-left sm:text-right">
-      <p className="animate-pulse text-[10px] uppercase text-violet-400">Now Playing</p>
-      <p className="font-mono text-lg tabular-nums">{formatRemaining(remainingSec)}</p>
-    </div>
+    <motion.div className="shrink-0 text-left sm:text-right">
+      <p className="text-[10px] uppercase tracking-[0.24em] text-violet-300/80">
+        Synced Session
+      </p>
+      <p className="font-mono text-lg tabular-nums text-violet-100">
+        {formatRemaining(remainingSec)}
+      </p>
+    </motion.div>
   )}
 </header>
+          {playing ? (
+            <motion.div
+              className={`rounded-2xl border border-violet-500/30 bg-violet-500/10 ${
+                syncLocked ? "mb-8 px-5 py-5" : "mb-4 px-4 py-3"
+              }`}
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.45, ease: "easeOut" }}
+            >
+              <p className="text-[10px] uppercase tracking-[0.24em] text-violet-300/80">
+                Resonating
+              </p>
+              <p className="mt-1 text-lg font-semibold text-white">{currentSound.label}</p>
+              <p className="mt-1 text-xs text-slate-400">{currentSound.description}</p>
+            </motion.div>
+          ) : (
           <div className="grid min-h-0 flex-1 grid-cols-1 content-start gap-3 overflow-y-auto pb-4 min-[420px]:grid-cols-2">
             {SOUND_LIST.map((s) => (
               <button
@@ -823,7 +1047,9 @@ export function HealingToneButton() {
               </button>
             ))}
           </div>
+          )}
 
+          {!playing && (
           <div className="mt-auto border-t border-slate-800 pt-6">
             <h2 className="mb-3 text-xs font-semibold uppercase tracking-wider text-slate-500">
               最近の履歴
@@ -863,22 +1089,11 @@ export function HealingToneButton() {
               )}
             </div>
           </div>
+          )}
         </main>
-      </div>
-
-      <footer className="border-t border-slate-800 bg-[#0f0f0f] p-4 sm:p-6">
-        <button
-          type="button"
-          onClick={() => void (playing ? stopPlayback() : startPlayback())}
-          className={`w-full rounded-lg py-4 text-sm font-bold tracking-widest transition ${
-            playing
-              ? "bg-red-500/10 text-red-500 hover:bg-red-500/20"
-              : "bg-violet-600 text-white hover:bg-violet-500"
-          }`}
-        >
-          {playing ? "STOP SESSION" : "START SESSION"}
-        </button>
-      </footer>
-    </div>
+      </motion.div>
+        </motion.div>
+      </motion.div>
+    </SessionControlContext.Provider>
   );
 }
