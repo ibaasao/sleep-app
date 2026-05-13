@@ -2,10 +2,16 @@ import { HealingToneButton } from "@/components/HealingToneButton";
 import { createClient } from "@/lib/supabase/server";
 
 export default async function Home() {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  let email: string | null = null;
+  try {
+    const supabase = await createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    email = user?.email ?? null;
+  } catch (err) {
+    console.error("[Home] Supabase session unavailable", err);
+  }
 
   return (
     <main className="relative z-10 flex min-h-dvh w-full flex-col items-center justify-center gap-6 px-4 py-8 sm:gap-10 sm:px-6 sm:py-16">
@@ -20,7 +26,7 @@ export default async function Home() {
           オフタイマーと再生ボタンで、時間が来ると音がフェードアウトして止まります。初回はブラウザの許可で音声が有効になります。ログインすると再生開始が記録されます。
         </p>
       </div>
-      <HealingToneButton email={user?.email ?? null} />
+      <HealingToneButton email={email} />
     </main>
   );
 }

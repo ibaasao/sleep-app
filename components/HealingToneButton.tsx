@@ -12,6 +12,7 @@ import {
 import { AuthNav } from "@/components/AuthNav";
 import { HiddenSignalLayer } from "@/components/session/HiddenSignalLayer";
 import { NeuralScanHud } from "@/components/session/NeuralScanHud";
+import { NeuralImmersionSlider } from "@/components/NeuralImmersionSlider";
 import { NeuralSynapseVisualizer } from "@/components/session/NeuralSynapseVisualizer";
 import { SessionAmbientField } from "@/components/session/SessionAmbientField";
 import { SessionLaunchBurst } from "@/components/session/SessionLaunchBurst";
@@ -34,8 +35,24 @@ const DEEP_OCEAN_LPF_HZ = 400;
 const DEEP_OCEAN_SWELL_SEC = 15;
 /** Neural Synchronizer（528Hz 選択時）左耳の周波数 */
 const NEURAL_SYNC_LEFT_HZ = 528;
-/** 右耳は覚醒用に +20Hz */
+/** 右耳は覚醒用に +20Hz（没入度最大時の目安） */
 const NEURAL_SYNC_RIGHT_HZ = 548;
+
+/** 没入度 t∈[0,1] から左右の拍差（Hz）。Relax で極小、Ethereal で最大近傍 */
+function neuralInterauralBeatHz(immersion: number): number {
+  const u = Math.min(1, Math.max(0, immersion));
+  return 0.06 + u ** 1.4 * (NEURAL_SYNC_RIGHT_HZ - NEURAL_SYNC_LEFT_HZ - 0.06);
+}
+
+function neuralDetuneWobbleHz(immersion: number): number {
+  const u = Math.min(1, Math.max(0, immersion));
+  return 0.028 + u * u * 2.65;
+}
+
+function neuralDetuneWobbleCents(immersion: number): number {
+  const u = Math.min(1, Math.max(0, immersion));
+  return 1.8 + u * 44;
+}
 
 /** ルーム残響のウェット量（ドライとのバランス） */
 const REVERB_WET = 0.4;
@@ -283,8 +300,8 @@ export function HealingToneButton({ email }: HealingToneButtonProps) {
   const [history, setHistory] = useState<SleepLogRow[]>([]);
   const [oscType, setOscType] = useState<Tone.ToneOscillatorType>("sine");
   const [modType, setModType] = useState<"none" | "breathe" | "vibrate">("none");
-  /** 528Hz（s3）選択時のみ有効な左右独立モード */
-  const [isNeuralSync, setIsNeuralSync] = useState(false);
+  /** 528Hz（s3）— Neural Synchronizer 没入度 0=Relax … 1=Ethereal */
+  const [neuralImmersion, setNeuralImmersion] = useState(0);
   const [launchBurst, setLaunchBurst] = useState(false);
   const [alignmentBurstAt, setAlignmentBurstAt] = useState<number | null>(null);
   const [syncLocked, setSyncLocked] = useState(false);
@@ -310,6 +327,9 @@ export function HealingToneButton({ email }: HealingToneButtonProps) {
   /** Neural Synchronizer 用パンナー（左右） */
   const neuralPannerLRef = useRef<Tone.Panner | null>(null);
   const neuralPannerRRef = useRef<Tone.Panner | null>(null);
+  const neuralImmersionRef = useRef(0);
+  /** 拍差のうねり（右耳 detune）— modType が vibrate のときは未使用 */
+  const neuralBeatLfoRef = useRef<Tone.LFO | null>(null);
   const fadeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const stopScheduleRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const endAtRef = useRef<number>(0);
@@ -319,9 +339,13 @@ export function HealingToneButton({ email }: HealingToneButtonProps) {
 
   useEffect(() => {
     if (selectedId !== "s3") {
-      setIsNeuralSync(false);
+      setNeuralImmersion(0);
     }
   }, [selectedId]);
+
+  useEffect(() => {
+    neuralImmersionRef.current = neuralImmersion;
+  }, [neuralImmersion]);
 
   const fetchHistory = useCallback(async () => {
     const supabase = createClient();
@@ -391,6 +415,11 @@ export function HealingToneButton({ email }: HealingToneButtonProps) {
       lfoRef.current.stop();
       lfoRef.current.dispose();
       lfoRef.current = null;
+    }
+    if (neuralBeatLfoRef.current) {
+      neuralBeatLfoRef.current.stop();
+      neuralBeatLfoRef.current.dispose();
+      neuralBeatLfoRef.current = null;
     }
     // ★追加ここまで
     if (noiseFilterRef.current) {
@@ -517,78 +546,61 @@ export function HealingToneButton({ email }: HealingToneButtonProps) {
         sourceRef.current = noise;
       }
     } else if (currentSound.id === "s3") {
-      if (isNeuralSync) {
-        const pannerL = new Tone.Panner(-1).connect(reverb);
-        const pannerR = new Tone.Panner(1).connect(reverb);
-        neuralPannerLRef.current = pannerL;
-        neuralPannerRRef.current = pannerR;
+      const immersion = Math.min(1, Math.max(0, neuralImmersion));
+      const beatHz = neuralInterauralBeatHz(immersion);
 
-        const oscL = new Tone.Oscillator(NEURAL_SYNC_LEFT_HZ, oscType).connect(
-          pannerL,
-        );
-        const oscR = new Tone.Oscillator(NEURAL_SYNC_RIGHT_HZ, oscType).connect(
-          pannerR,
-        );
-        oscL.volume.value = -14;
-        oscR.volume.value = -14;
-        sourceRef.current = oscL;
-        secondOscRef.current = oscR;
+      const pannerL = new Tone.Panner(-1).connect(reverb);
+      const pannerR = new Tone.Panner(1).connect(reverb);
+      neuralPannerLRef.current = pannerL;
+      neuralPannerRRef.current = pannerR;
 
-        if (modType === "breathe") {
-          const lfo = new Tone.LFO({
-            frequency: 1 / 13,
-            min: -50,
-            max: -14,
-            type: "sine",
-          });
-          lfo.connect(oscL.volume);
-          lfo.connect(oscR.volume);
-          lfo.start();
-          lfoRef.current = lfo;
-        } else if (modType === "vibrate") {
-          const lfo = new Tone.LFO({
-            frequency: 4,
-            min: -15,
-            max: 15,
-            type: "sine",
-          });
-          lfo.connect(oscL.detune);
-          lfo.connect(oscR.detune);
-          lfo.start();
-          lfoRef.current = lfo;
-        }
-      } else {
-        const f = currentSound.freq!;
-        const osc = new Tone.Oscillator(f, oscType).connect(reverb);
-        osc.volume.value = -14;
+      const oscL = new Tone.Oscillator(NEURAL_SYNC_LEFT_HZ, oscType).connect(
+        pannerL,
+      );
+      const oscR = new Tone.Oscillator(
+        NEURAL_SYNC_LEFT_HZ + beatHz,
+        oscType,
+      ).connect(pannerR);
+      oscL.volume.value = -14;
+      oscR.volume.value = -14;
+      sourceRef.current = oscL;
+      secondOscRef.current = oscR;
 
-        if (modType === "breathe") {
-          const lfo = new Tone.LFO({
-            frequency: 1 / 13,
-            min: -50,
-            max: -14,
-            type: "sine",
-          }).connect(osc.volume);
-          lfo.start();
-          lfoRef.current = lfo;
-        } else if (modType === "vibrate") {
-          const lfo = new Tone.LFO({
-            frequency: 4,
-            min: -15,
-            max: 15,
-            type: "sine",
-          }).connect(osc.detune);
-          lfo.start();
-          lfoRef.current = lfo;
-        }
+      if (modType !== "vibrate") {
+        const cents = neuralDetuneWobbleCents(immersion);
+        const beatLfo = new Tone.LFO({
+          frequency: neuralDetuneWobbleHz(immersion),
+          min: -cents,
+          max: cents,
+          type: "sine",
+        });
+        beatLfo.connect(oscR.detune);
+        beatLfo.start();
+        neuralBeatLfoRef.current = beatLfo;
+      }
 
-        sourceRef.current = osc;
-        const depth = new Tone.Oscillator(
-          f + DEPTH_DETUNE_HZ,
-          "sine",
-        ).connect(reverb);
-        depth.volume.value = -17;
-        depthOscRef.current = depth;
+      if (modType === "breathe") {
+        const lfo = new Tone.LFO({
+          frequency: 1 / 13,
+          min: -50,
+          max: -14,
+          type: "sine",
+        });
+        lfo.connect(oscL.volume);
+        lfo.connect(oscR.volume);
+        lfo.start();
+        lfoRef.current = lfo;
+      } else if (modType === "vibrate") {
+        const lfo = new Tone.LFO({
+          frequency: 4,
+          min: -15,
+          max: 15,
+          type: "sine",
+        });
+        lfo.connect(oscL.detune);
+        lfo.connect(oscR.detune);
+        lfo.start();
+        lfoRef.current = lfo;
       }
     } else if (currentSound.id === "n6") {
       // 528Hz（愛）/ 432Hz（宇宙）/ 63.3Hz（地球の鼓動）を
@@ -687,7 +699,7 @@ export function HealingToneButton({ email }: HealingToneButtonProps) {
     beginFadeOut,
     clearTimers,
     disposeSources,
-    isNeuralSync,
+    neuralImmersion,
     modType,
     oscType,
   ]);
@@ -709,6 +721,30 @@ export function HealingToneButton({ email }: HealingToneButtonProps) {
   }, [playing]);
 
   useEffect(() => {
+    if (!playing || currentSound.id !== "s3") return;
+
+    if (modType === "vibrate" && neuralBeatLfoRef.current) {
+      neuralBeatLfoRef.current.stop();
+      neuralBeatLfoRef.current.dispose();
+      neuralBeatLfoRef.current = null;
+    }
+
+    const immersion = Math.min(1, Math.max(0, neuralImmersion));
+    const beatHz = neuralInterauralBeatHz(immersion);
+    secondOscRef.current?.frequency.rampTo(NEURAL_SYNC_LEFT_HZ + beatHz, 0.08);
+
+    if (modType === "vibrate") return;
+
+    const lfoN = neuralBeatLfoRef.current;
+    if (lfoN) {
+      lfoN.frequency.rampTo(neuralDetuneWobbleHz(immersion), 0.11);
+      const c = neuralDetuneWobbleCents(immersion);
+      lfoN.min = -c;
+      lfoN.max = c;
+    }
+  }, [playing, currentSound.id, neuralImmersion, modType]);
+
+  useEffect(() => {
     return () => {
       clearTimers();
       disposeSources();
@@ -726,6 +762,11 @@ export function HealingToneButton({ email }: HealingToneButtonProps) {
       lfoRef.current.stop();
       lfoRef.current.dispose();
       lfoRef.current = null;
+    }
+    if (neuralBeatLfoRef.current) {
+      neuralBeatLfoRef.current.stop();
+      neuralBeatLfoRef.current.dispose();
+      neuralBeatLfoRef.current = null;
     }
 
     const voices = [
@@ -810,6 +851,7 @@ export function HealingToneButton({ email }: HealingToneButtonProps) {
         soundId={selectedId}
         alignmentBurstAt={alignmentBurstAt}
         syncLocked={syncLocked}
+        immersionRef={neuralImmersionRef}
       />
       <HiddenSignalLayer
         active={playing}
@@ -886,8 +928,10 @@ export function HealingToneButton({ email }: HealingToneButtonProps) {
           soundId={selectedId}
           alignmentBurstAt={alignmentBurstAt}
           syncLocked={syncLocked}
+          immersionRef={neuralImmersionRef}
         />
-        <header className="mb-4 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+        <header className="mb-4 flex flex-col gap-3">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
   <motion.div
     className={`flex w-full min-w-0 flex-col gap-3 lg:flex-row lg:items-center lg:gap-6 ${
       playing ? "hidden" : ""
@@ -897,33 +941,38 @@ export function HealingToneButton({ email }: HealingToneButtonProps) {
   >
     <h1 className="shrink-0 text-lg font-bold sm:text-xl">Sound Library</h1>
 
-    {/* ★ 528Hz (s3) が選ばれていて、かつ再生中でない時に表示 */}
     {selectedId === "s3" && !playing && (
-      <div className="flex w-full min-w-0 flex-col gap-3 rounded-2xl border border-slate-800 bg-slate-900/80 px-3 py-3 shadow-inner sm:flex-row sm:flex-wrap sm:items-center sm:gap-x-4 sm:gap-y-2 sm:rounded-full sm:px-4 sm:py-1.5">
+      <div className="relative flex w-full min-w-0 flex-col gap-4 overflow-hidden rounded-2xl border border-cyan-500/25 bg-gradient-to-br from-slate-950/95 via-violet-950/50 to-cyan-950/35 px-4 py-4 shadow-[0_0_48px_-14px_rgba(34,211,238,0.4)] backdrop-blur-md sm:flex-row sm:flex-wrap sm:items-center sm:gap-x-5 sm:gap-y-3 sm:px-5 sm:py-3.5">
         <div
-          className="flex flex-wrap items-center gap-x-2 gap-y-1"
+          className="pointer-events-none absolute inset-0 z-0 rounded-2xl bg-[radial-gradient(ellipse_at_30%_0%,rgba(167,139,250,0.22),transparent_50%)] opacity-90"
+          aria-hidden
+        />
+        <div
+          className="relative z-10 flex flex-wrap items-center gap-x-2 gap-y-1"
           title={
-            isNeuralSync
-              ? "Neural Synchronizer ON でも音色を変更できます"
+            neuralImmersion > 0.06
+              ? "没入モード中でも音色を変更できます"
               : undefined
           }
         >
-          <span className="text-[10px] font-bold text-slate-500 uppercase tracking-tighter">音色:</span>
+          <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-cyan-200/80">
+            音色
+          </span>
           <div className="flex gap-2">
             {["sine", "triangle"].map((t) => (
               <label
                 key={t}
-                className="flex cursor-pointer items-center gap-1 group"
+                className="group flex cursor-pointer items-center gap-1.5"
               >
                 <input
                   type="radio"
                   name="oscType"
-                  className="h-3 w-3 cursor-pointer accent-violet-500"
+                  className="h-3 w-3 cursor-pointer accent-cyan-400"
                   checked={oscType === t}
                   onChange={() => setOscType(t as Tone.ToneOscillatorType)}
                 />
                 <span
-                  className={`text-xs ${oscType === t ? "font-bold text-violet-400" : "text-slate-400 group-hover:text-slate-200"}`}
+                  className={`text-xs ${oscType === t ? "font-bold text-cyan-100 drop-shadow-[0_0_8px_rgba(34,211,238,0.6)]" : "text-slate-400 group-hover:text-slate-200"}`}
                 >
                   {t === "sine" ? "Pure" : "Mild"}
                 </span>
@@ -932,36 +981,40 @@ export function HealingToneButton({ email }: HealingToneButtonProps) {
           </div>
         </div>
 
-        <div className="hidden h-3 w-px shrink-0 bg-slate-800 sm:block" />
+        <div className="relative z-10 hidden h-8 w-px shrink-0 bg-gradient-to-b from-transparent via-cyan-500/35 to-transparent sm:block" />
 
         <div
-          className="flex flex-wrap items-center gap-x-2 gap-y-1"
+          className="relative z-10 flex flex-wrap items-center gap-x-2 gap-y-1"
           title={
-            isNeuralSync
-              ? "Neural Synchronizer ON でもゆらぎを変更できます"
+            neuralImmersion > 0.06
+              ? "没入モード中でもゆらぎを変更できます"
               : undefined
           }
         >
-          <span className="text-[10px] font-bold text-slate-500 uppercase tracking-tighter">ゆらぎ:</span>
+          <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-violet-200/80">
+            ゆらぎ
+          </span>
           <div className="flex gap-3">
             {[
               { id: "none", label: "Off" },
               { id: "breathe", label: "Breathe" },
-              { id: "vibrate", label: "Vibrate" }
+              { id: "vibrate", label: "Vibrate" },
             ].map((m) => (
               <label
                 key={m.id}
-                className="flex cursor-pointer items-center gap-1 group"
+                className="group flex cursor-pointer items-center gap-1.5"
               >
                 <input
                   type="radio"
                   name="modType"
-                  className="h-3 w-3 cursor-pointer accent-violet-500"
+                  className="h-3 w-3 cursor-pointer accent-fuchsia-400"
                   checked={modType === m.id}
-                  onChange={() => setModType(m.id as "none" | "breathe" | "vibrate")}
+                  onChange={() =>
+                    setModType(m.id as "none" | "breathe" | "vibrate")
+                  }
                 />
                 <span
-                  className={`text-xs ${modType === m.id ? "font-bold text-violet-400" : "text-slate-400 group-hover:text-slate-200"}`}
+                  className={`text-xs ${modType === m.id ? "font-bold text-fuchsia-100 drop-shadow-[0_0_8px_rgba(232,121,249,0.5)]" : "text-slate-400 group-hover:text-slate-200"}`}
                 >
                   {m.label}
                 </span>
@@ -970,32 +1023,52 @@ export function HealingToneButton({ email }: HealingToneButtonProps) {
           </div>
         </div>
 
-        <div className="hidden h-3 w-px shrink-0 bg-slate-800 sm:block" />
+        <div className="relative z-10 hidden h-8 w-px shrink-0 bg-gradient-to-b from-transparent via-fuchsia-500/30 to-transparent sm:block" />
 
-        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-          <span className="shrink-0 text-[9px] font-bold uppercase leading-tight tracking-tight text-slate-500 sm:max-w-none">
-            Neural Synchronizer
-          </span>
-          <div className="flex gap-3">
-            {[
-              { value: false, label: "OFF" },
-              { value: true, label: "ON" },
-            ].map((o) => (
-              <label key={String(o.value)} className="flex cursor-pointer items-center gap-1 group">
-                <input
-                  type="radio"
-                  name="neuralSync"
-                  className="h-3 w-3 cursor-pointer accent-violet-500"
-                  checked={isNeuralSync === o.value}
-                  onChange={() => setIsNeuralSync(o.value)}
-                />
-                <span
-                  className={`text-xs ${isNeuralSync === o.value ? "font-bold text-violet-400" : "text-slate-500 group-hover:text-slate-300"}`}
-                >
-                  {o.label}
-                </span>
-              </label>
-            ))}
+        <div className="relative z-10 flex min-w-[200px] flex-1 flex-col gap-2 sm:min-w-[260px]">
+          <div className="flex items-baseline justify-between gap-2">
+            <span className="bg-gradient-to-r from-cyan-200 via-violet-200 to-fuchsia-200 bg-clip-text text-[10px] font-bold uppercase tracking-[0.28em] text-transparent">
+              Neural synchronizer
+            </span>
+          </div>
+          <p className="text-[11px] leading-snug text-violet-100/55">
+            スライダーで意識の深さを潜らせ、脳波同期の密度を感覚的に調整します。
+          </p>
+          <div className="relative pt-1">
+            <NeuralImmersionSlider
+              value={neuralImmersion}
+              onChange={setNeuralImmersion}
+              variant="card"
+            />
+            <div className="mt-2 flex justify-between text-[10px] font-semibold tracking-[0.12em]">
+              <span
+                className={
+                  neuralImmersion < 0.34
+                    ? "text-cyan-200 drop-shadow-[0_0_10px_rgba(34,211,238,0.55)]"
+                    : "text-slate-500"
+                }
+              >
+                Relax
+              </span>
+              <span
+                className={
+                  neuralImmersion >= 0.34 && neuralImmersion < 0.67
+                    ? "text-violet-200 drop-shadow-[0_0_10px_rgba(167,139,250,0.5)]"
+                    : "text-slate-500"
+                }
+              >
+                Deep
+              </span>
+              <span
+                className={
+                  neuralImmersion >= 0.67
+                    ? "text-fuchsia-200 drop-shadow-[0_0_10px_rgba(244,114,182,0.45)]"
+                    : "text-slate-500"
+                }
+              >
+                Ethereal
+              </span>
+            </div>
           </div>
         </div>
       </div>
@@ -1012,7 +1085,64 @@ export function HealingToneButton({ email }: HealingToneButtonProps) {
       </p>
     </motion.div>
   )}
-</header>
+          </div>
+
+          {playing && selectedId === "s3" && !syncLocked && (
+            <motion.div
+              initial={{ opacity: 0, y: 6 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.4, ease: "easeOut" }}
+              className="relative overflow-hidden rounded-2xl border border-cyan-500/30 bg-gradient-to-r from-slate-950/90 via-violet-950/45 to-fuchsia-950/35 px-4 py-3 shadow-[0_0_36px_-10px_rgba(167,139,250,0.45)]"
+            >
+              <div
+                className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_80%_20%,rgba(244,114,182,0.12),transparent_45%)]"
+                aria-hidden
+              />
+              <div className="relative flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-4">
+                <div className="shrink-0 sm:max-w-[11rem]">
+                  <p className="bg-gradient-to-r from-cyan-200 to-fuchsia-200 bg-clip-text text-[10px] font-bold uppercase tracking-[0.3em] text-transparent">
+                    Consciousness depth
+                  </p>
+                  <p className="mt-0.5 text-[11px] text-violet-100/60">
+                    没入を続けながら微調整できます
+                  </p>
+                </div>
+                <div className="min-w-0 flex-1">
+                  <NeuralImmersionSlider
+                    value={neuralImmersion}
+                    onChange={setNeuralImmersion}
+                    variant="session"
+                  />
+                  <div className="mt-1.5 flex justify-between text-[9px] font-semibold uppercase tracking-[0.18em] text-slate-500">
+                    <span
+                      className={
+                        neuralImmersion < 0.34 ? "text-cyan-200/90" : ""
+                      }
+                    >
+                      Relax
+                    </span>
+                    <span
+                      className={
+                        neuralImmersion >= 0.34 && neuralImmersion < 0.67
+                          ? "text-violet-200/90"
+                          : ""
+                      }
+                    >
+                      Deep
+                    </span>
+                    <span
+                      className={
+                        neuralImmersion >= 0.67 ? "text-fuchsia-200/90" : ""
+                      }
+                    >
+                      Ethereal
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </motion.div>
+          )}
+        </header>
           {playing ? (
             <motion.div
               className={`rounded-2xl border border-violet-500/30 bg-violet-500/10 ${

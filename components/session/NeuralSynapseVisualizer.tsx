@@ -1,6 +1,7 @@
 "use client";
 
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
+import type { MutableRefObject } from "react";
 import { useEffect, useRef } from "react";
 
 import { getBreathPulse, getSessionTheme, rgba } from "@/components/session/sessionTheme";
@@ -29,6 +30,7 @@ type Props = {
   soundId: string;
   alignmentBurstAt: number | null;
   syncLocked: boolean;
+  immersionRef: MutableRefObject<number>;
 };
 
 function createNetwork(width: number, height: number) {
@@ -98,6 +100,7 @@ export function NeuralSynapseVisualizer({
   soundId,
   alignmentBurstAt,
   syncLocked,
+  immersionRef,
 }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const reduceMotion = useReducedMotion();
@@ -128,6 +131,11 @@ export function NeuralSynapseVisualizer({
     const draw = (time: number) => {
       const width = canvas.clientWidth;
       const height = canvas.clientHeight;
+      const immersion =
+        soundId === "s3"
+          ? Math.min(1, Math.max(0, immersionRef.current))
+          : 0.355;
+      const synapseSpeed = 0.45 + immersion * 1.55;
       const pullStrength = getLockPullStrength(
         alignmentBurstAt,
         time,
@@ -155,8 +163,9 @@ export function NeuralSynapseVisualizer({
             node.vx *= 0.9;
             node.vy *= 0.9;
           } else {
-            node.x += node.vx;
-            node.y += node.vy;
+            const vm = 0.55 + immersion * 0.95;
+            node.x += node.vx * vm;
+            node.y += node.vy * vm;
             if (node.x < 0 || node.x > width) node.vx *= -1;
             if (node.y < 0 || node.y > height) node.vy *= -1;
           }
@@ -173,7 +182,7 @@ export function NeuralSynapseVisualizer({
 
         const flowSpeed = syncLocked
           ? link.speed * (link.primary ? 0.42 : 0.28)
-          : link.speed;
+          : link.speed * synapseSpeed;
         link.pulse = (link.pulse + flowSpeed) % 1;
         const intensity =
           0.22 +
@@ -269,7 +278,7 @@ export function NeuralSynapseVisualizer({
       window.cancelAnimationFrame(frameId);
       window.removeEventListener("resize", resize);
     };
-  }, [active, alignmentBurstAt, reduceMotion, syncLocked, theme]);
+  }, [active, alignmentBurstAt, immersionRef, reduceMotion, soundId, syncLocked, theme]);
 
   return (
     <AnimatePresence>

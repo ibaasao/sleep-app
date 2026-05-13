@@ -1,6 +1,7 @@
 "use client";
 
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
+import type { MutableRefObject } from "react";
 import { useEffect, useRef } from "react";
 
 import {
@@ -25,6 +26,8 @@ type Props = {
   soundId: string;
   alignmentBurstAt: number | null;
   syncLocked: boolean;
+  /** 0 = Relax（穏やか）… 1 = Ethereal（高密度）— 毎フレーム読むので ref */
+  immersionRef: MutableRefObject<number>;
 };
 
 function createParticles(width: number, height: number): Particle[] {
@@ -44,6 +47,7 @@ export function SessionAmbientField({
   soundId,
   alignmentBurstAt,
   syncLocked,
+  immersionRef,
 }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const reduceMotion = useReducedMotion();
@@ -121,6 +125,12 @@ export function SessionAmbientField({
         context.restore();
       }
 
+      const immersion =
+        soundId === "s3"
+          ? Math.min(1, Math.max(0, immersionRef.current))
+          : 0.46;
+      const flowMul = 0.38 + immersion * 1.35;
+
       for (const particle of particles) {
         if (!reduceMotion) {
           if (pullStrength > 0.02) {
@@ -128,9 +138,9 @@ export function SessionAmbientField({
             particle.x += (centerX - particle.x) * pull;
             particle.y += (centerY - particle.y) * pull;
           } else if (!syncLocked) {
-            particle.drift += particle.speed * 0.01;
-            particle.x += Math.cos(particle.drift) * 0.18;
-            particle.y += Math.sin(particle.drift) * 0.12;
+            particle.drift += particle.speed * 0.01 * flowMul;
+            particle.x += Math.cos(particle.drift) * (0.1 + immersion * 0.14);
+            particle.y += Math.sin(particle.drift) * (0.07 + immersion * 0.09);
           }
         }
 
@@ -141,10 +151,22 @@ export function SessionAmbientField({
           if (particle.y > height + 8) particle.y = -8;
         }
 
+        const localTwinkle =
+          0.92 +
+          Math.sin(time * (0.0018 + immersion * 0.014) + particle.drift) *
+            (0.06 + immersion * 0.14) +
+          Math.sin(
+            time * (0.0024 + immersion * 0.022) + particle.drift * 2.1,
+          ) *
+            (0.04 + immersion * 0.1);
+
         context.beginPath();
         context.fillStyle = rgba(
           theme.particleRgb,
-          particle.alpha * (0.55 + pulse * 0.35) * (0.65 + pullStrength * 0.35),
+          particle.alpha *
+            (0.55 + pulse * 0.35) *
+            (0.65 + pullStrength * 0.35) *
+            localTwinkle,
         );
         context.arc(particle.x, particle.y, particle.radius, 0, Math.PI * 2);
         context.fill();
@@ -161,7 +183,7 @@ export function SessionAmbientField({
       window.cancelAnimationFrame(frameId);
       window.removeEventListener("resize", resize);
     };
-  }, [active, alignmentBurstAt, reduceMotion, syncLocked, theme]);
+  }, [active, alignmentBurstAt, immersionRef, reduceMotion, soundId, syncLocked, theme]);
 
   return (
     <AnimatePresence>
