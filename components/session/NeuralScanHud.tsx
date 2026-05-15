@@ -7,11 +7,18 @@ type Props = {
   active: boolean;
   syncLocked: boolean;
   onSyncLocked?: () => void;
+  /** 進行前（0〜12秒台）: スライダー等と同様に操作不能スタイルの対象 */
+  preSyncGate?: boolean;
 };
 
 const FOCUS_STATES = ["LOW", "DRIFTING", "UNSTABLE"] as const;
 
-export function NeuralScanHud({ active, syncLocked, onSyncLocked }: Props) {
+export function NeuralScanHud({
+  active,
+  syncLocked,
+  onSyncLocked,
+  preSyncGate = false,
+}: Props) {
   const reduceMotion = useReducedMotion();
   const [noise, setNoise] = useState(78);
   const [focusIndex, setFocusIndex] = useState(0);
@@ -73,6 +80,7 @@ export function NeuralScanHud({ active, syncLocked, onSyncLocked }: Props) {
               ? "mb-8 border-violet-500/10 px-5 py-4"
               : "mb-4 border-violet-500/20 px-4 py-3"
           }`}
+          {...(preSyncGate ? { "data-pre-sync-gate": "" } : {})}
           initial={{ opacity: 0, y: -12 }}
           animate={{ opacity: 1, y: 0 }}
           exit={{ opacity: 0, y: -8 }}

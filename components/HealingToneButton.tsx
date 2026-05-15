@@ -6,9 +6,11 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
 } from "react";
+import { createPortal } from "react-dom";
 import { AuthNav } from "@/components/AuthNav";
 import { HiddenSignalLayer } from "@/components/session/HiddenSignalLayer";
 import { NeuralScanHud } from "@/components/session/NeuralScanHud";
@@ -16,9 +18,27 @@ import { NeuralImmersionSlider } from "@/components/NeuralImmersionSlider";
 import { NeuralSynapseVisualizer } from "@/components/session/NeuralSynapseVisualizer";
 import { SessionAmbientField } from "@/components/session/SessionAmbientField";
 import { SessionLaunchBurst } from "@/components/session/SessionLaunchBurst";
+import { EvolveNeuralHeroOverlay } from "@/components/session/EvolveNeuralHeroOverlay";
 import { SyncLockFlash } from "@/components/session/SyncLockFlash";
+import {
+  QuickMoodDiagnosis,
+  type QuickMoodSelection,
+} from "@/components/QuickMoodDiagnosis";
+import {
+  DEFAULT_SOUND_417_SETTINGS,
+  Sound417DetailPanel,
+  type Sound417Settings,
+} from "@/components/Sound417DetailPanel";
+import type { HeartRateSessionPreset } from "@/components/HeartRateTest";
 import { motion } from "framer-motion";
 import * as Tone from "tone";
+import {
+  SESSION_EVOLVE_REVEAL_MS,
+  usePlaybackTimeManager,
+} from "@/hooks/usePlaybackTimeManager";
+
+/** Strict Mode 二重マウントでも心拍プリセット適用が二重起動しないようにする */
+const appliedHeartPresetRequestIds = new Set<number>();
 
 const FADE_SECONDS = 8;
 /** メインに重ねる奥行き用オシレーターの周波数オフセット（Hz） */
@@ -58,8 +78,30 @@ function neuralDetuneWobbleCents(immersion: number): number {
 const REVERB_WET = 0.4;
 /** 残響の減衰時間（秒）—長めで空間感を強調 */
 const REVERB_DECAY_SEC = 6;
+
+/** 進化前: マスター LPF でこもり感 */
+const MASTER_LPF_PRE_HZ = 1280;
+/** 進化後: 実質フルレンジ */
+const MASTER_LPF_POST_HZ = 20000;
+/** 進化前後のマスター線形ゲイン（Web Audio GainNode） */
+const MASTER_GAIN_PRE = 0.86;
+const MASTER_GAIN_POST = 1.09;
+
+/**
+ * 528Hz Pure/Mild（sine / triangle）に応じたハイシェルフゲイン（dB）— 進化後の明瞭さ調整の入口
+ */
+function shelfGainDbFor528Osc(oscType: Tone.ToneOscillatorType): number {
+  if (oscType === "triangle") return 0.35;
+  return 2.55;
+}
 const TIMER_OPTIONS = [15, 30, 60] as const;
 type TimerMinutes = (typeof TIMER_OPTIONS)[number];
+
+type StartPlaybackOptions = {
+  fadeInSec?: number;
+  soundId?: string;
+  minutesOverride?: TimerMinutes;
+};
 
 type ToneType = "solfeggio" | "sleep";
 
@@ -263,6 +305,7 @@ async function recordSleepLogAtPlay(
 type SessionControlValue = {
   playing: boolean;
   toggleSession: () => void;
+  isEvolved: boolean;
 };
 
 const SessionControlContext = createContext<SessionControlValue | null>(null);
@@ -271,28 +314,60 @@ function SessionControlButton() {
   const session = useContext(SessionControlContext);
   if (!session) return null;
 
-  const { playing, toggleSession } = session;
+  const { playing, toggleSession, isEvolved } = session;
 
   return (
-    <button
+    <motion.button
       type="button"
+      initial={false}
       onClick={() => void toggleSession()}
-      className={`rounded-full px-4 py-1.5 text-sm font-bold tracking-wider transition ${
+      whileTap={{ scale: 0.96 }}
+      className={`touch-manipulation rounded-full font-bold tracking-wider outline-none ring-offset-2 ring-offset-[#0a0a0a] transition-[box-shadow,transform,colors] duration-100 ${
         playing
-          ? "bg-red-500/10 text-red-500 ring-1 ring-red-500/30 hover:bg-red-500/20"
-          : "bg-violet-600 text-white ring-1 ring-violet-500/40 hover:bg-violet-500"
+          ? isEvolved
+            ? "bg-red-500/15 px-5 py-2.5 text-sm text-red-400 ring-2 ring-red-400/50 ring-offset-2 hover:bg-red-500/25"
+            : "bg-red-500/10 px-4 py-1.5 text-sm text-red-500 ring-1 ring-red-500/30 hover:bg-red-500/20"
+          : "bg-gradient-to-r from-violet-600 to-fuchsia-600 px-7 py-3 text-base text-white shadow-[0_0_32px_-4px_rgba(167,139,250,0.75),0_0_48px_-8px_rgba(244,114,182,0.45)] ring-2 ring-violet-400/60 hover:from-violet-500 hover:to-fuchsia-500 hover:shadow-[0_0_40px_rgba(167,139,250,0.85)] active:brightness-110"
       }`}
+      animate={
+        playing
+          ? isEvolved
+            ? { scale: [1, 1.02, 1] }
+            : { scale: 1 }
+          : {
+              scale: [1, 1.035, 1],
+              boxShadow: [
+                "0 0 28px -4px rgba(167,139,250,0.65), 0 0 40px -8px rgba(244,114,182,0.35)",
+                "0 0 40px 0px rgba(167,139,250,0.85), 0 0 56px -4px rgba(244,114,182,0.5)",
+                "0 0 28px -4px rgba(167,139,250,0.65), 0 0 40px -8px rgba(244,114,182,0.35)",
+              ],
+            }
+      }
+      transition={
+        playing && isEvolved
+          ? { duration: 2.4, repeat: Infinity, ease: "easeInOut" }
+          : !playing
+            ? { duration: 2.2, repeat: Infinity, ease: "easeInOut" }
+            : { duration: 0.08 }
+      }
     >
       {playing ? "STOP SESSION" : "START SESSION"}
-    </button>
+    </motion.button>
   );
 }
 
 type HealingToneButtonProps = {
   email: string | null;
+  /** 心拍テスト OK 後 — 指定サウンドでセッションを自動開始 */
+  heartSessionPreset?: HeartRateSessionPreset | null;
+  onHeartSessionConsumed?: () => void;
 };
 
-export function HealingToneButton({ email }: HealingToneButtonProps) {
+export function HealingToneButton({
+  email,
+  heartSessionPreset,
+  onHeartSessionConsumed,
+}: HealingToneButtonProps) {
   const [playing, setPlaying] = useState(false);
   const [selectedId, setSelectedId] = useState<string>("s3");
   const [minutes, setMinutes] = useState<TimerMinutes>(30);
@@ -306,6 +381,15 @@ export function HealingToneButton({ email }: HealingToneButtonProps) {
   const [alignmentBurstAt, setAlignmentBurstAt] = useState<number | null>(null);
   const [syncLocked, setSyncLocked] = useState(false);
   const lockSilenceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** クイック診断で選んだ周波数（Hz）— Sound Library の選択と同期 */
+  const [activeFrequency, setActiveFrequency] = useState<number | null>(null);
+  const [quickFeedback, setQuickFeedback] = useState<string | null>(null);
+  const [quickPortalTarget, setQuickPortalTarget] = useState<
+    HTMLElement | "missing" | null
+  >(null);
+  const [sound417Settings, setSound417Settings] = useState<Sound417Settings>(
+    DEFAULT_SOUND_417_SETTINGS,
+  );
 
   const sourceRef = useRef<Tone.Oscillator | Tone.Noise | null>(null);
   const secondOscRef = useRef<Tone.Oscillator | null>(null);
@@ -333,6 +417,51 @@ export function HealingToneButton({ email }: HealingToneButtonProps) {
   const fadeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const stopScheduleRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const endAtRef = useRef<number>(0);
+  /** マスター出力: 進化前 LPF → 528 音色連動用ハイシェルフ → ゲイン */
+  const masterLpfRef = useRef<Tone.Filter | null>(null);
+  const masterShelfRef = useRef<Tone.Filter | null>(null);
+  const masterGainRef = useRef<Tone.Gain | null>(null);
+  /** s3 再生中に構築したゆらぎ LFO がどの modType 向けか（進化後の切替検知用） */
+  const modLfoBuiltForModTypeRef = useRef<
+    "none" | "breathe" | "vibrate" | null
+  >(null);
+
+  const { isEvolved } = usePlaybackTimeManager(playing);
+
+  const [evolveAnimStartedAt, setEvolveAnimStartedAt] = useState<number | null>(
+    null,
+  );
+  const evolveHeroDoneRef = useRef(false);
+  const [evolveHeroGate, setEvolveHeroGate] = useState(false);
+
+  useEffect(() => {
+    if (!playing) {
+      setEvolveAnimStartedAt(null);
+      return;
+    }
+    setEvolveAnimStartedAt((prev) =>
+      prev == null ? performance.now() : prev,
+    );
+  }, [playing]);
+
+  useEffect(() => {
+    if (!playing) {
+      evolveHeroDoneRef.current = false;
+      setEvolveHeroGate(false);
+      return;
+    }
+    if (selectedId !== "s3" || syncLocked) {
+      setEvolveHeroGate(false);
+      return;
+    }
+    if (evolveHeroDoneRef.current) return;
+    evolveHeroDoneRef.current = true;
+    setEvolveHeroGate(true);
+    const t = window.setTimeout(() => {
+      setEvolveHeroGate(false);
+    }, SESSION_EVOLVE_REVEAL_MS);
+    return () => window.clearTimeout(t);
+  }, [playing, selectedId, syncLocked]);
 
   const currentSound =
     SOUND_LIST.find((s) => s.id === selectedId) || SOUND_LIST[2];
@@ -346,6 +475,16 @@ export function HealingToneButton({ email }: HealingToneButtonProps) {
   useEffect(() => {
     neuralImmersionRef.current = neuralImmersion;
   }, [neuralImmersion]);
+
+  useEffect(() => {
+    const shelf = masterShelfRef.current;
+    if (!shelf || !playing) return;
+    if (selectedId === "s3") {
+      shelf.gain.rampTo(shelfGainDbFor528Osc(oscType), 0.1);
+    } else {
+      shelf.gain.rampTo(0, 0.08);
+    }
+  }, [oscType, playing, selectedId]);
 
   const fetchHistory = useCallback(async () => {
     const supabase = createClient();
@@ -446,6 +585,19 @@ export function HealingToneButton({ email }: HealingToneButtonProps) {
       reverbRef.current.dispose();
       reverbRef.current = null;
     }
+    if (masterGainRef.current) {
+      masterGainRef.current.dispose();
+      masterGainRef.current = null;
+    }
+    if (masterShelfRef.current) {
+      masterShelfRef.current.dispose();
+      masterShelfRef.current = null;
+    }
+    if (masterLpfRef.current) {
+      masterLpfRef.current.dispose();
+      masterLpfRef.current = null;
+    }
+    modLfoBuiltForModTypeRef.current = null;
   }, []);
 
   const stopPlayback = useCallback(() => {
@@ -485,33 +637,80 @@ export function HealingToneButton({ email }: HealingToneButtonProps) {
     }, FADE_SECONDS * 1000 + 120);
   }, [clearTimers, disposeSources, fetchHistory]);
 
-  const startPlayback = useCallback(async () => {
+  const startPlayback = useCallback(async (opts?: StartPlaybackOptions) => {
     await Tone.start();
     // 👇 これを追加！フタを開ける（ミュート解除）
     Tone.Destination.mute = false;
     clearTimers();
     disposeSources();
 
-    const durationMs = minutes * 60 * 1000;
+    const sessionSound =
+      opts?.soundId != null
+        ? (SOUND_LIST.find((s) => s.id === opts.soundId) ?? currentSound)
+        : currentSound;
+    const sessionMinutes: TimerMinutes =
+      opts?.minutesOverride != null &&
+      (TIMER_OPTIONS as readonly number[]).includes(opts.minutesOverride)
+        ? opts.minutesOverride
+        : minutes;
+
+    const durationMs = sessionMinutes * 60 * 1000;
     const waitMs = Math.max(0, durationMs - FADE_SECONDS * 1000);
 
-    const reverb = new Tone.Reverb(REVERB_DECAY_SEC);
-    reverb.wet.value = REVERB_WET;
-    await reverb.generate();
-    reverb.toDestination();
-    reverbRef.current = reverb;
+    const masterLpf = new Tone.Filter({
+      type: "lowpass",
+      frequency: MASTER_LPF_PRE_HZ,
+      rolloff: -24,
+    });
+    masterLpf.Q.value = 0.78;
 
+    const masterShelf = new Tone.Filter({
+      type: "highshelf",
+      frequency: 7200,
+      Q: 0.65,
+      gain: 0,
+    });
 
-    if (currentSound.id === "rain") {
-      const player = new Tone.Player(currentSound.audioUrl).toDestination();
+    const masterGain = new Tone.Gain(MASTER_GAIN_PRE);
+    masterLpf.connect(masterShelf);
+    masterShelf.connect(masterGain);
+    masterGain.toDestination();
+
+    masterLpfRef.current = masterLpf;
+    masterShelfRef.current = masterShelf;
+    masterGainRef.current = masterGain;
+
+    const t0 = Tone.now();
+    const rawFadeIn = opts?.fadeInSec ?? 0;
+    const fadeInSec = rawFadeIn > 0.05 ? Math.min(rawFadeIn, 10) : 0;
+
+    masterLpf.frequency.setValueAtTime(MASTER_LPF_POST_HZ, t0);
+
+    if (fadeInSec > 0.05) {
+      const tFadeEnd = t0 + fadeInSec;
+      masterGain.gain.cancelScheduledValues(t0);
+      masterGain.gain.setValueAtTime(0, t0);
+      masterGain.gain.linearRampToValueAtTime(MASTER_GAIN_POST, tFadeEnd);
+    } else {
+      masterGain.gain.setValueAtTime(MASTER_GAIN_POST, t0);
+    }
+
+    if (sessionSound.id === "rain") {
+      const player = new Tone.Player(sessionSound.audioUrl).connect(masterLpf);
       await Tone.loaded();
       player.start();
       setPlaying(true);
       return;
     }
 
-    if (currentSound.noiseType) {
-      if (currentSound.id === "n5") {
+    const reverb = new Tone.Reverb(REVERB_DECAY_SEC);
+    reverb.wet.value = REVERB_WET;
+    await reverb.generate();
+    reverb.connect(masterLpf);
+    reverbRef.current = reverb;
+
+    if (sessionSound.noiseType) {
+      if (sessionSound.id === "n5") {
         const ocean = new Tone.AutoFilter({
           frequency: 1 / DEEP_OCEAN_SWELL_SEC,
           depth: 1,
@@ -528,7 +727,7 @@ export function HealingToneButton({ email }: HealingToneButtonProps) {
         noise.volume.value = -22;
         sourceRef.current = noise;
         oceanAutoFilterRef.current = ocean;
-      } else if (currentSound.noiseType === "pink") {
+      } else if (sessionSound.noiseType === "pink") {
         const lp = new Tone.Filter({
           type: "lowpass",
           frequency: PINK_NOISE_LPF_HZ,
@@ -541,11 +740,11 @@ export function HealingToneButton({ email }: HealingToneButtonProps) {
         sourceRef.current = noise;
         noiseFilterRef.current = lp;
       } else {
-        const noise = new Tone.Noise(currentSound.noiseType).connect(reverb);
+        const noise = new Tone.Noise(sessionSound.noiseType).connect(reverb);
         noise.volume.value = -20;
         sourceRef.current = noise;
       }
-    } else if (currentSound.id === "s3") {
+    } else if (sessionSound.id === "s3") {
       const immersion = Math.min(1, Math.max(0, neuralImmersion));
       const beatHz = neuralInterauralBeatHz(immersion);
 
@@ -602,7 +801,8 @@ export function HealingToneButton({ email }: HealingToneButtonProps) {
         lfo.start();
         lfoRef.current = lfo;
       }
-    } else if (currentSound.id === "n6") {
+      modLfoBuiltForModTypeRef.current = modType;
+    } else if (sessionSound.id === "n6") {
       // 528Hz（愛）/ 432Hz（宇宙）/ 63.3Hz（地球の鼓動）を
       // 音量バランスを変えて重ねる。
       const oscA = new Tone.Oscillator(528, "sine").connect(reverb);
@@ -618,22 +818,22 @@ export function HealingToneButton({ email }: HealingToneButtonProps) {
       sourceRef.current = oscA;
       secondOscRef.current = oscB;
       thirdOscRef.current = oscC;
-    } else if (currentSound.id === "n7") {
+    } else if (sessionSound.id === "n7") {
       // 528Hzをベースに、LFOで音量を13秒周期で動かす
-      const osc = new Tone.Oscillator(currentSound.freq!, "sine").connect(reverb);
-      
+      const osc = new Tone.Oscillator(sessionSound.freq!, "sine").connect(reverb);
+
       const lfo = new Tone.LFO({
         frequency: 1 / 13,
         min: -60, // ほぼ聞こえないレベル
         max: -15, // はっきり聞こえるレベル
-        type: "sine"
+        type: "sine",
       }).connect(osc.volume);
 
       lfo.start();
       sourceRef.current = osc;
       lfoRef.current = lfo;
-    // ★追加ここまで
-    } else if (currentSound.id === "n3" || currentSound.id === "n4") {
+      // ★追加ここまで
+    } else if (sessionSound.id === "n3" || sessionSound.id === "n4") {
       // 左右パンを最大に広げ、各チャンネルを 200Hz ローパスして「ザー」感を抑える。
       const pannerL = new Tone.Panner(-1).connect(reverb);
       const pannerR = new Tone.Panner(1).connect(reverb);
@@ -650,12 +850,12 @@ export function HealingToneButton({ email }: HealingToneButtonProps) {
       binauralFilterLRef.current = lowpassL;
       binauralFilterRRef.current = lowpassR;
 
-      const oscL = new Tone.Oscillator(currentSound.freq!, "sine").connect(
+      const oscL = new Tone.Oscillator(sessionSound.freq!, "sine").connect(
         lowpassL,
       );
-      const diff = currentSound.id === "n3" ? 3 : 6;
+      const diff = sessionSound.id === "n3" ? 3 : 6;
       const oscR = new Tone.Oscillator(
-        currentSound.freq! + diff,
+        sessionSound.freq! + diff,
         "triangle",
       ).connect(lowpassR);
       oscL.volume.value = -30;
@@ -663,7 +863,7 @@ export function HealingToneButton({ email }: HealingToneButtonProps) {
       sourceRef.current = oscL;
       secondOscRef.current = oscR;
     } else {
-      const f = currentSound.freq!;
+      const f = sessionSound.freq!;
       const osc = new Tone.Oscillator(f, "sine").connect(reverb);
       osc.volume.value = -14;
       const depth = new Tone.Oscillator(
@@ -683,7 +883,7 @@ export function HealingToneButton({ email }: HealingToneButtonProps) {
 
     void recordSleepLogAtPlay(
       playedAtIso,
-      buildNotesPayload(currentSound, minutes),
+      buildNotesPayload(sessionSound, sessionMinutes),
     );
 
     endAtRef.current = Date.now() + durationMs;
@@ -720,6 +920,124 @@ export function HealingToneButton({ email }: HealingToneButtonProps) {
     return () => window.clearInterval(id);
   }, [playing]);
 
+  /** 進化後: Breathe / Vibrate / Off の切替でゆらぎ LFO を作り直す */
+  useEffect(() => {
+    if (!playing || selectedId !== "s3" || syncLocked) return;
+    if (modLfoBuiltForModTypeRef.current === modType) return;
+
+    const oscL = sourceRef.current;
+    const oscR = secondOscRef.current;
+    if (
+      !oscL ||
+      !oscR ||
+      !(oscL instanceof Tone.Oscillator) ||
+      !(oscR instanceof Tone.Oscillator)
+    )
+      return;
+
+    if (lfoRef.current) {
+      try {
+        lfoRef.current.stop();
+        lfoRef.current.disconnect();
+        lfoRef.current.dispose();
+      } catch {
+        /* disposed */
+      }
+      lfoRef.current = null;
+    }
+
+    const immersion = Math.min(1, Math.max(0, neuralImmersionRef.current));
+
+    if (modType === "none") {
+      if (!neuralBeatLfoRef.current && oscR) {
+        const cents = neuralDetuneWobbleCents(immersion);
+        const beatLfo = new Tone.LFO({
+          frequency: neuralDetuneWobbleHz(immersion),
+          min: -cents,
+          max: cents,
+          type: "sine",
+        });
+        beatLfo.connect(oscR.detune);
+        beatLfo.start();
+        neuralBeatLfoRef.current = beatLfo;
+      }
+      modLfoBuiltForModTypeRef.current = modType;
+      return;
+    }
+
+    if (modType === "breathe") {
+      const breathHz = (1 / 13) * (0.55 + 0.85 * immersion);
+      const depth = 22 + immersion * 38;
+      const lfo = new Tone.LFO({
+        frequency: breathHz,
+        min: -14 - depth,
+        max: -14,
+        type: "sine",
+      });
+      lfo.connect(oscL.volume);
+      lfo.connect(oscR.volume);
+      lfo.start();
+      lfoRef.current = lfo;
+    } else if (modType === "vibrate") {
+      const vibHz = 2.2 + immersion * 7;
+      const d = 10 + immersion * 22;
+      const lfo = new Tone.LFO({
+        frequency: vibHz,
+        min: -d,
+        max: d,
+        type: "sine",
+      });
+      lfo.connect(oscL.detune);
+      lfo.connect(oscR.detune);
+      lfo.start();
+      lfoRef.current = lfo;
+    }
+
+    if (modType === "vibrate") {
+      if (neuralBeatLfoRef.current) {
+        neuralBeatLfoRef.current.stop();
+        neuralBeatLfoRef.current.dispose();
+        neuralBeatLfoRef.current = null;
+      }
+    } else if (!neuralBeatLfoRef.current) {
+      const cents = neuralDetuneWobbleCents(immersion);
+      const beatLfo = new Tone.LFO({
+        frequency: neuralDetuneWobbleHz(immersion),
+        min: -cents,
+        max: cents,
+        type: "sine",
+      });
+      beatLfo.connect(oscR.detune);
+      beatLfo.start();
+      neuralBeatLfoRef.current = beatLfo;
+    }
+
+    modLfoBuiltForModTypeRef.current = modType;
+  }, [modType, playing, selectedId, syncLocked]);
+
+  /** 進化後: 没入スライダーに追従して Breathe / Vibrate の深さを即反映 */
+  useEffect(() => {
+    if (!playing || selectedId !== "s3" || syncLocked) return;
+
+    const immersion = Math.min(1, Math.max(0, neuralImmersion));
+    const lfo = lfoRef.current;
+    if (!lfo) return;
+
+    if (modType === "breathe") {
+      const breathHz = (1 / 13) * (0.55 + 0.85 * immersion);
+      const depth = 22 + immersion * 38;
+      lfo.frequency.rampTo(breathHz, 0.032);
+      lfo.min = -14 - depth;
+      lfo.max = -14;
+    } else if (modType === "vibrate") {
+      const vibHz = 2.2 + immersion * 7;
+      const d = 10 + immersion * 22;
+      lfo.frequency.rampTo(vibHz, 0.032);
+      lfo.min = -d;
+      lfo.max = d;
+    }
+  }, [neuralImmersion, modType, playing, selectedId, syncLocked]);
+
   useEffect(() => {
     if (!playing || currentSound.id !== "s3") return;
 
@@ -731,18 +1049,39 @@ export function HealingToneButton({ email }: HealingToneButtonProps) {
 
     const immersion = Math.min(1, Math.max(0, neuralImmersion));
     const beatHz = neuralInterauralBeatHz(immersion);
-    secondOscRef.current?.frequency.rampTo(NEURAL_SYNC_LEFT_HZ + beatHz, 0.08);
+    const rampF = 0.032;
+    secondOscRef.current?.frequency.rampTo(NEURAL_SYNC_LEFT_HZ + beatHz, rampF);
 
     if (modType === "vibrate") return;
 
+    const oscR = secondOscRef.current;
+    if (oscR && !neuralBeatLfoRef.current) {
+      const cents = neuralDetuneWobbleCents(immersion);
+      const beatLfo = new Tone.LFO({
+        frequency: neuralDetuneWobbleHz(immersion),
+        min: -cents,
+        max: cents,
+        type: "sine",
+      });
+      beatLfo.connect(oscR.detune);
+      beatLfo.start();
+      neuralBeatLfoRef.current = beatLfo;
+    }
+
     const lfoN = neuralBeatLfoRef.current;
     if (lfoN) {
-      lfoN.frequency.rampTo(neuralDetuneWobbleHz(immersion), 0.11);
+      const rampW = 0.042;
+      lfoN.frequency.rampTo(neuralDetuneWobbleHz(immersion), rampW);
       const c = neuralDetuneWobbleCents(immersion);
       lfoN.min = -c;
       lfoN.max = c;
     }
-  }, [playing, currentSound.id, neuralImmersion, modType]);
+  }, [
+    playing,
+    currentSound.id,
+    neuralImmersion,
+    modType,
+  ]);
 
   useEffect(() => {
     return () => {
@@ -757,12 +1096,15 @@ export function HealingToneButton({ email }: HealingToneButtonProps) {
     return `${m}:${s.toString().padStart(2, "0")}`;
   };
 
+  const snap = playing ? 0.1 : 0.42;
+
   const pauseSessionModulationForLock = useCallback(() => {
     if (lfoRef.current) {
       lfoRef.current.stop();
       lfoRef.current.dispose();
       lfoRef.current = null;
     }
+    modLfoBuiltForModTypeRef.current = null;
     if (neuralBeatLfoRef.current) {
       neuralBeatLfoRef.current.stop();
       neuralBeatLfoRef.current.dispose();
@@ -819,13 +1161,97 @@ export function HealingToneButton({ email }: HealingToneButtonProps) {
     void startPlayback();
   }, [playing, startPlayback, stopPlayback]);
 
+  const QUICK_SESSION_FADE_IN_SEC = 3;
+  const prevPlayingRef = useRef(false);
+
+  useEffect(() => {
+    if (prevPlayingRef.current && !playing) {
+      setActiveFrequency(null);
+    }
+    prevPlayingRef.current = playing;
+  }, [playing]);
+
+  useEffect(() => {
+    if (!quickFeedback) return;
+    const id = window.setTimeout(() => setQuickFeedback(null), 5000);
+    return () => window.clearTimeout(id);
+  }, [quickFeedback]);
+
+  const handleQuickMoodPick = useCallback(
+    (sel: QuickMoodSelection) => {
+      if (playing) return;
+      setSelectedId(sel.soundId);
+      setMinutes(30);
+      setActiveFrequency(sel.hz);
+      setQuickFeedback(
+        `今のあなたに最適な波形（${sel.hz}Hz）を生成しました。深い没入体験をお楽しみください。`,
+      );
+      setLaunchBurst(true);
+      setAlignmentBurstAt(null);
+      setSyncLocked(false);
+      void (async () => {
+        try {
+          await startPlayback({
+            fadeInSec: QUICK_SESSION_FADE_IN_SEC,
+            soundId: sel.soundId,
+            minutesOverride: 30,
+          });
+        } catch (e) {
+          console.error("[QuickMood]", e);
+          setQuickFeedback(null);
+          setActiveFrequency(null);
+          setLaunchBurst(false);
+        }
+      })();
+    },
+    [playing, startPlayback],
+  );
+
+  useEffect(() => {
+    if (!heartSessionPreset) return;
+    if (playing) return;
+
+    const rid = heartSessionPreset.requestId;
+    if (rid == null || appliedHeartPresetRequestIds.has(rid)) return;
+    appliedHeartPresetRequestIds.add(rid);
+
+    const { soundId, frequencyHz, advisoryMessage } = heartSessionPreset;
+
+    void (async () => {
+      try {
+        setSelectedId(soundId);
+        setMinutes(30);
+        setActiveFrequency(frequencyHz);
+        setQuickFeedback(
+          `心拍に基づき ${frequencyHz}Hz を選びました。${advisoryMessage}`,
+        );
+        setLaunchBurst(true);
+        setAlignmentBurstAt(null);
+        setSyncLocked(false);
+        await startPlayback({
+          fadeInSec: QUICK_SESSION_FADE_IN_SEC,
+          soundId,
+          minutesOverride: 30,
+        });
+      } catch (e) {
+        console.error("[HeartRateSession]", e);
+        appliedHeartPresetRequestIds.delete(rid);
+        setQuickFeedback(null);
+        setActiveFrequency(null);
+        setLaunchBurst(false);
+      } finally {
+        onHeartSessionConsumed?.();
+      }
+    })();
+  }, [heartSessionPreset, playing, startPlayback, onHeartSessionConsumed]);
+
   const handleSyncLocked = useCallback(() => {
     setAlignmentBurstAt(performance.now());
     setSyncLocked(true);
     pauseSessionModulationForLock();
   }, [pauseSessionModulationForLock]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     document.documentElement.classList.toggle("session-focus", playing);
     document.documentElement.classList.toggle("session-lock-focus", syncLocked);
     return () => {
@@ -844,14 +1270,36 @@ export function HealingToneButton({ email }: HealingToneButtonProps) {
     return () => window.clearTimeout(timer);
   }, [launchBurst]);
 
+  useLayoutEffect(() => {
+    const el = document.getElementById("quick-mood-root");
+    setQuickPortalTarget(el ?? "missing");
+  }, []);
+
+  const quickMoodNode = (
+    <QuickMoodDiagnosis
+      disabled={playing}
+      feedback={quickFeedback}
+      activeHz={playing ? activeFrequency : null}
+      onPick={handleQuickMoodPick}
+    />
+  );
+
   return (
-    <SessionControlContext.Provider value={{ playing, toggleSession }}>
+    <SessionControlContext.Provider
+      value={{ playing, toggleSession, isEvolved }}
+    >
       <SessionAmbientField
         active={playing}
         soundId={selectedId}
         alignmentBurstAt={alignmentBurstAt}
         syncLocked={syncLocked}
         immersionRef={neuralImmersionRef}
+        evolveAnimStartedAt={evolveAnimStartedAt}
+      />
+      <EvolveNeuralHeroOverlay
+        active={evolveHeroGate}
+        value={neuralImmersion}
+        onChange={setNeuralImmersion}
       />
       <HiddenSignalLayer
         active={playing}
@@ -860,40 +1308,62 @@ export function HealingToneButton({ email }: HealingToneButtonProps) {
       />
       <SyncLockFlash burstAt={alignmentBurstAt} />
       <SessionLaunchBurst active={launchBurst} />
-      <motion.div className="relative z-10 flex w-full max-w-5xl flex-col items-center gap-4">
+      {quickPortalTarget != null && quickPortalTarget !== "missing"
+        ? createPortal(quickMoodNode, quickPortalTarget)
+        : null}
+      <motion.div
+        data-react-session-evolved={isEvolved ? "true" : "false"}
+        className={`relative z-10 flex w-full max-w-5xl flex-col items-center gap-4 ${
+          isEvolved ? "session-react-evolved" : ""
+        }`}
+      >
+        {quickPortalTarget === "missing" ? (
+          <div className="w-full max-w-3xl px-0 sm:px-1">{quickMoodNode}</div>
+        ) : null}
         <motion.div
           className="flex flex-wrap items-center justify-center gap-3"
+          initial={false}
           animate={{
             opacity: syncLocked ? 0.2 : playing ? 0.45 : 1,
             scale: playing ? 0.98 : 1,
           }}
-          transition={{ duration: 0.45, ease: "easeOut" }}
+          transition={{ duration: snap, ease: "easeOut" }}
         >
           <AuthNav email={email} />
           <SessionControlButton />
         </motion.div>
         <motion.div
-          className={`relative flex h-auto w-full flex-col overflow-hidden rounded-xl border bg-[#0a0a0a] text-slate-200 shadow-2xl transition-colors duration-700 md:min-h-[600px] ${
-            playing ? "border-violet-500/25" : "border-slate-800"
+          className={`relative flex h-auto w-full flex-col overflow-hidden rounded-xl border bg-[#0a0a0a] text-slate-200 shadow-2xl md:min-h-[600px] ${
+            playing
+              ? isEvolved
+                ? "border-violet-400/35 duration-150"
+                : "border-violet-500/25 duration-700"
+              : "border-slate-800 duration-200"
           }`}
         >
       <motion.div
         className="flex min-h-0 flex-1 flex-col md:flex-row"
-        animate={{ opacity: playing ? 0.92 : 1 }}
-        transition={{ duration: 0.45, ease: "easeOut" }}
+        initial={false}
+        animate={{ opacity: 1 }}
+        transition={{ duration: snap, ease: "easeOut" }}
       >
         <aside
-          className={`w-full shrink-0 border-b border-slate-800 bg-[#0f0f0f] p-4 transition-all duration-500 md:w-60 md:border-b-0 md:border-r md:p-6 ${
+          className={`w-full shrink-0 border-b border-slate-800 bg-[#0f0f0f] p-4 transition-all md:border-b-0 md:border-r md:p-6 ${
             syncLocked
               ? "hidden"
-              : playing
-                ? "pointer-events-none opacity-30 md:w-44"
-                : ""
+              : playing && isEvolved
+                  ? "md:w-56 ring-1 ring-violet-500/30"
+                  : "md:w-60"
           }`}
         >
           <h2 className="mb-3 text-xs font-semibold uppercase tracking-widest text-slate-500 md:mb-4">
             Timer
           </h2>
+          {playing && isEvolved ? (
+            <p className="mb-2 text-[10px] leading-snug text-violet-300/70">
+              オフまでの残り時間がカウントされます。分数はタップで変更できます。
+            </p>
+          ) : null}
           <div className="grid grid-cols-3 gap-2 md:flex md:flex-col">
             {TIMER_OPTIONS.map((m) => (
               <button
@@ -901,7 +1371,7 @@ export function HealingToneButton({ email }: HealingToneButtonProps) {
                 type="button"
                 disabled={playing}
                 onClick={() => setMinutes(m)}
-                className={`rounded-lg px-3 py-2 text-center text-sm transition md:text-left ${
+                className={`touch-manipulation rounded-lg px-3 py-2 text-center text-sm transition-[transform,colors,box-shadow] duration-75 will-change-transform active:scale-95 md:text-left ${
                   minutes === m
                     ? "bg-violet-500/20 text-violet-400 ring-1 ring-violet-500/50"
                     : "text-slate-400 hover:bg-slate-800"
@@ -936,8 +1406,9 @@ export function HealingToneButton({ email }: HealingToneButtonProps) {
     className={`flex w-full min-w-0 flex-col gap-3 lg:flex-row lg:items-center lg:gap-6 ${
       playing ? "hidden" : ""
     }`}
+    initial={false}
     animate={{ opacity: playing ? 0 : 1 }}
-    transition={{ duration: 0.45, ease: "easeOut" }}
+    transition={{ duration: snap, ease: "easeOut" }}
   >
     <h1 className="shrink-0 text-lg font-bold sm:text-xl">Sound Library</h1>
 
@@ -1076,13 +1547,29 @@ export function HealingToneButton({ email }: HealingToneButtonProps) {
   </motion.div>
 
   {playing && remainingSec !== null && (
-    <motion.div className="shrink-0 text-left sm:text-right">
+    <motion.div
+      className="shrink-0 text-left sm:text-right"
+      initial={false}
+      animate={{ opacity: 1 }}
+      transition={{ duration: snap }}
+    >
       <p className="text-[10px] uppercase tracking-[0.24em] text-violet-300/80">
         Synced Session
       </p>
-      <p className="font-mono text-lg tabular-nums text-violet-100">
+      <motion.p
+        key={remainingSec}
+        className="font-mono text-lg tabular-nums text-violet-100"
+        initial={{ scale: 1.08, opacity: 0.75 }}
+        animate={{ scale: 1, opacity: 1 }}
+        transition={{
+          type: "spring",
+          stiffness: 560,
+          damping: 26,
+          mass: 0.22,
+        }}
+      >
         {formatRemaining(remainingSec)}
-      </p>
+      </motion.p>
     </motion.div>
   )}
           </div>
@@ -1091,14 +1578,14 @@ export function HealingToneButton({ email }: HealingToneButtonProps) {
             <motion.div
               initial={{ opacity: 0, y: 6 }}
               animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.4, ease: "easeOut" }}
+              transition={{ duration: snap, ease: "easeOut" }}
               className="relative overflow-hidden rounded-2xl border border-cyan-500/30 bg-gradient-to-r from-slate-950/90 via-violet-950/45 to-fuchsia-950/35 px-4 py-3 shadow-[0_0_36px_-10px_rgba(167,139,250,0.45)]"
             >
               <div
                 className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_80%_20%,rgba(244,114,182,0.12),transparent_45%)]"
                 aria-hidden
               />
-              <div className="relative flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-4">
+              <div className="relative flex w-full flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:gap-4">
                 <div className="shrink-0 sm:max-w-[11rem]">
                   <p className="bg-gradient-to-r from-cyan-200 to-fuchsia-200 bg-clip-text text-[10px] font-bold uppercase tracking-[0.3em] text-transparent">
                     Consciousness depth
@@ -1139,6 +1626,38 @@ export function HealingToneButton({ email }: HealingToneButtonProps) {
                     </span>
                   </div>
                 </div>
+                {isEvolved && (
+                  <div className="w-full border-t border-cyan-500/20 pt-3 sm:order-3 sm:basis-full">
+                    <span className="text-[10px] font-bold uppercase tracking-[0.22em] text-fuchsia-200/85">
+                      ゆらぎ（リアルタイム）
+                    </span>
+                    <div className="flex flex-wrap gap-3">
+                      {[
+                        { id: "none" as const, label: "Off" },
+                        { id: "breathe" as const, label: "Breathe" },
+                        { id: "vibrate" as const, label: "Vibrate" },
+                      ].map((m) => (
+                        <label
+                          key={m.id}
+                          className="group flex cursor-pointer items-center gap-1.5 transition-transform duration-75 active:scale-95"
+                        >
+                          <input
+                            type="radio"
+                            name="modTypeSession"
+                            className="h-3 w-3 cursor-pointer accent-fuchsia-400"
+                            checked={modType === m.id}
+                            onChange={() => setModType(m.id)}
+                          />
+                          <span
+                            className={`text-xs ${modType === m.id ? "font-bold text-fuchsia-100" : "text-slate-400 group-hover:text-slate-200"}`}
+                          >
+                            {m.label}
+                          </span>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             </motion.div>
           )}
@@ -1150,7 +1669,7 @@ export function HealingToneButton({ email }: HealingToneButtonProps) {
               }`}
               initial={{ opacity: 0, y: 8 }}
               animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.45, ease: "easeOut" }}
+              transition={{ duration: snap, ease: "easeOut" }}
             >
               <p className="text-[10px] uppercase tracking-[0.24em] text-violet-300/80">
                 Resonating
@@ -1160,22 +1679,62 @@ export function HealingToneButton({ email }: HealingToneButtonProps) {
             </motion.div>
           ) : (
           <div className="grid min-h-0 flex-1 grid-cols-1 content-start gap-3 overflow-y-auto pb-4 min-[420px]:grid-cols-2">
-            {SOUND_LIST.map((s) => (
-              <button
-                key={s.id}
-                type="button"
-                onClick={() => !playing && setSelectedId(s.id)}
-                disabled={playing}
-                className={`rounded-lg border p-3 text-left transition disabled:cursor-not-allowed sm:p-4 ${
-                  selectedId === s.id
-                    ? "border-violet-500 bg-violet-500/5"
-                    : "border-slate-800 bg-slate-900/30 hover:border-slate-700"
-                } ${playing && selectedId !== s.id ? "opacity-40" : ""}`}
-              >
-                <div className="text-sm font-bold text-white">{s.label}</div>
-                <div className="text-xs text-slate-500">{s.description}</div>
-              </button>
-            ))}
+            {SOUND_LIST.map((s) => {
+              const isSelected = selectedId === s.id;
+              const is417 = s.id === "s2";
+
+              if (is417) {
+                return (
+                  <div
+                    key={s.id}
+                    className={`rounded-lg border transition-[box-shadow,colors] duration-200 ${
+                      isSelected
+                        ? "border-violet-500 bg-violet-500/5 shadow-[0_0_28px_-8px_rgba(167,139,250,0.55)]"
+                        : "border-slate-800 bg-slate-900/30"
+                    } ${playing && !isSelected ? "opacity-40" : ""}`}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => setSelectedId(s.id)}
+                      disabled={playing}
+                      className="touch-manipulation w-full rounded-lg p-3 text-left transition-[transform,colors] duration-100 will-change-transform hover:bg-violet-500/5 active:scale-[0.985] disabled:cursor-not-allowed sm:p-4"
+                    >
+                      <div className="text-sm font-bold text-white">{s.label}</div>
+                      <div className="text-xs text-slate-500">{s.description}</div>
+                    </button>
+                    {isSelected && !playing ? (
+                      <div
+                        className="px-3 pb-3 sm:px-4 sm:pb-4"
+                        onPointerDown={(e) => e.stopPropagation()}
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <Sound417DetailPanel
+                          settings={sound417Settings}
+                          onChange={setSound417Settings}
+                        />
+                      </div>
+                    ) : null}
+                  </div>
+                );
+              }
+
+              return (
+                <button
+                  key={s.id}
+                  type="button"
+                  onClick={() => setSelectedId(s.id)}
+                  disabled={playing}
+                  className={`touch-manipulation rounded-lg border p-3 text-left transition-[transform,colors,box-shadow] duration-100 will-change-transform hover:border-slate-600 active:scale-[0.985] disabled:cursor-not-allowed sm:p-4 ${
+                    isSelected
+                      ? "border-violet-500 bg-violet-500/5"
+                      : "border-slate-800 bg-slate-900/30 hover:border-slate-700"
+                  } ${playing && !isSelected ? "opacity-40" : ""}`}
+                >
+                  <div className="text-sm font-bold text-white">{s.label}</div>
+                  <div className="text-xs text-slate-500">{s.description}</div>
+                </button>
+              );
+            })}
           </div>
           )}
 

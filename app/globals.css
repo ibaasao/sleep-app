@@ -38,3 +38,50 @@ html.session-lock-focus .session-intro {
     transform 0.7s ease,
     max-height 0.7s ease;
 }
+
+/*
+ * 進化前後の body 背景
+ * - :has() 非対応向けに data-session-evolved を併記
+ * - 固定全画面キャンバスが body の上に乗るため、body 背景だけでは変化が見えない場合がある
+ */
+html.session-focus[data-session-evolved="false"] body,
+html.session-focus:not(:has(body.is-evolved)) body {
+  background-color: #060a14;
+  background-image: none;
+  animation: session-pre-sync-body-pulse 22s ease-in-out infinite alternate;
+}
+
+@keyframes session-pre-sync-body-pulse {
+  0% {
+    background-color: #050810;
+  }
+  100% {
+    background-color: #0a1628;
+  }
+}
+
+html.session-focus[data-session-evolved="false"] [data-pre-sync-gate],
+html.session-focus:not(:has(body.is-evolved)) [data-pre-sync-gate] {
+  opacity: 0.28 !important;
+  pointer-events: none !important;
+  transition: opacity 0.45s ease;
+}
+
+html.session-focus[data-session-evolved="true"] body,
+html.session-focus:has(body.is-evolved) body {
+  animation: none;
+  transition:
+    background-color 0.5s cubic-bezier(0.22, 1, 0.36, 1),
+    background 0.5s cubic-bezier(0.22, 1, 0.36, 1);
+  background-color: #070b16;
+  background-image:
+    radial-gradient(ellipse 100% 72% at 50% -5%, rgba(167, 139, 250, 0.2), transparent 58%),
+    radial-gradient(ellipse 85% 55% at 92% 45%, rgba(34, 211, 238, 0.14), transparent 52%),
+    radial-gradient(ellipse 70% 50% at 8% 85%, rgba(244, 114, 182, 0.1), transparent 48%),
+    linear-gradient(188deg, #0c1530 0%, #050810 48%, #070d18 100%);
+}
+
+/* body.is-evolved 単体でも進化後スタイルを当てる（:has 非依存） */
+body.is-evolved {
+  animation: none;
+}

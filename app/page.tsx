@@ -1,4 +1,4 @@
-import { HealingToneButton } from "@/components/HealingToneButton";
+import { HomeSessionBlock } from "@/components/HomeSessionBlock";
 import { createClient } from "@/lib/supabase/server";
 
 export default async function Home() {
@@ -14,7 +14,7 @@ export default async function Home() {
   }
 
   return (
-    <main className="relative z-10 flex min-h-dvh w-full flex-col items-center justify-center gap-6 px-4 py-8 sm:gap-10 sm:px-6 sm:py-16">
+    <main className="relative z-10 flex min-h-dvh w-full flex-col items-center justify-start gap-6 px-4 pb-16 pt-8 sm:gap-8 sm:px-6 sm:pb-20 sm:pt-10">
       <div className="session-intro w-full max-w-md text-center">
         <p className="text-xs font-medium uppercase tracking-[0.2em] text-slate-400 sm:text-sm">
           sleep sound
@@ -26,7 +26,11 @@ export default async function Home() {
           オフタイマーと再生ボタンで、時間が来ると音がフェードアウトして止まります。初回はブラウザの許可で音声が有効になります。ログインすると再生開始が記録されます。
         </p>
       </div>
-      <HealingToneButton email={email} />
+      <div
+        id="quick-mood-root"
+        className="w-full max-w-3xl shrink-0"
+      />
+      <HomeSessionBlock email={email} />
     </main>
   );
 }

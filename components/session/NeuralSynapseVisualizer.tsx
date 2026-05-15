@@ -31,6 +31,7 @@ type Props = {
   alignmentBurstAt: number | null;
   syncLocked: boolean;
   immersionRef: MutableRefObject<number>;
+  preSyncGate?: boolean;
 };
 
 function createNetwork(width: number, height: number) {
@@ -101,6 +102,7 @@ export function NeuralSynapseVisualizer({
   alignmentBurstAt,
   syncLocked,
   immersionRef,
+  preSyncGate = false,
 }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const reduceMotion = useReducedMotion();
@@ -289,6 +291,7 @@ export function NeuralSynapseVisualizer({
               ? "mb-6 border-violet-500/10"
               : "mb-4 border-violet-500/15"
           }`}
+          {...(preSyncGate ? { "data-pre-sync-gate": "" } : {})}
           initial={{ opacity: 0, y: 8 }}
           animate={{ opacity: syncLocked ? 0.9 : 1, y: 0 }}
           exit={{ opacity: 0, y: 6 }}

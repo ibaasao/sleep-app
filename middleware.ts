@@ -12,6 +12,10 @@ export async function middleware(request: NextRequest) {
 
 export const config = {
   matcher: [
-    "/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
+    /*
+     * Avoid running auth refresh on static assets (CSS/JS/fonts etc.).
+     * If middleware touches these requests, styles can fail to load in dev/production.
+     */
+    "/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|css|js|mjs|map|woff2?|ttf|otf)$).*)",
   ],
 };

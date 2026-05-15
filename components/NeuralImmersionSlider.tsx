@@ -7,8 +7,8 @@ export type NeuralImmersionSliderProps = {
   value: number;
   onChange: (next: number) => void;
   disabled?: boolean;
-  /** card = 設定パネル内 / session = 再生中バー */
-  variant?: "card" | "session";
+  /** card = 設定パネル内 / session = 再生中バー / evolveHero = 進化瞬間の中央ヒーロー */
+  variant?: "card" | "session" | "evolveHero";
 };
 
 type TrailDot = {
@@ -42,6 +42,18 @@ const INPUT_SESSION =
   "[&::-moz-range-thumb]:cursor-grab [&::-moz-range-thumb]:bg-gradient-to-br [&::-moz-range-thumb]:from-amber-100 [&::-moz-range-thumb]:via-cyan-100 [&::-moz-range-thumb]:to-fuchsia-200 " +
   "[&::-moz-range-thumb]:[clip-path:polygon(50%_0%,61%_35%,98%_35%,68%_57%,79%_91%,50%_70%,21%_91%,32%_57%,2%_35%,39%_35%)] " +
   "[&::-moz-range-thumb]:shadow-[0_0_4px_#fff,0_0_14px_rgba(34,211,238,0.95),0_0_22px_rgba(232,121,249,0.75)]";
+
+const INPUT_EVOLVE_HERO =
+  "relative z-20 h-4 w-full cursor-pointer appearance-none rounded-full bg-transparent disabled:cursor-not-allowed disabled:opacity-40 " +
+  "[&::-webkit-slider-thumb]:h-8 [&::-webkit-slider-thumb]:w-8 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:border-0 " +
+  "[&::-webkit-slider-thumb]:cursor-grab [&::-webkit-slider-thumb]:active:cursor-grabbing " +
+  "[&::-webkit-slider-thumb]:bg-gradient-to-br [&::-webkit-slider-thumb]:from-amber-100 [&::-webkit-slider-thumb]:via-cyan-100 [&::-webkit-slider-thumb]:to-fuchsia-200 " +
+  "[&::-webkit-slider-thumb]:[clip-path:polygon(50%_0%,61%_35%,98%_35%,68%_57%,79%_91%,50%_70%,21%_91%,32%_57%,2%_35%,39%_35%)] " +
+  "[&::-webkit-slider-thumb]:shadow-[0_0_8px_#fff,0_0_22px_rgba(34,211,238,1),0_0_40px_rgba(167,139,250,0.95),0_0_52px_rgba(244,114,182,0.65)] " +
+  "[&::-moz-range-thumb]:h-8 [&::-moz-range-thumb]:w-8 [&::-moz-range-thumb]:appearance-none [&::-moz-range-thumb]:border-0 " +
+  "[&::-moz-range-thumb]:cursor-grab [&::-moz-range-thumb]:bg-gradient-to-br [&::-moz-range-thumb]:from-amber-100 [&::-moz-range-thumb]:via-cyan-100 [&::-moz-range-thumb]:to-fuchsia-200 " +
+  "[&::-moz-range-thumb]:[clip-path:polygon(50%_0%,61%_35%,98%_35%,68%_57%,79%_91%,50%_70%,21%_91%,32%_57%,2%_35%,39%_35%)] " +
+  "[&::-moz-range-thumb]:shadow-[0_0_8px_#fff,0_0_22px_rgba(34,211,238,1),0_0_40px_rgba(167,139,250,0.95),0_0_52px_rgba(244,114,182,0.65)]";
 
 export function NeuralImmersionSlider({
   value,
@@ -94,6 +106,7 @@ export function NeuralImmersionSlider({
   const pct = Math.round(value * 100);
   const glow = value;
   const isSession = variant === "session";
+  const isEvolveHero = variant === "evolveHero";
 
   const syncGlowLayers = [
     `0 0 ${8 + glow * 36}px rgba(34, 211, 238, ${0.15 + glow * 0.55})`,
@@ -103,20 +116,33 @@ export function NeuralImmersionSlider({
   ].join(", ");
 
   const trackGradient =
-    variant === "session"
-      ? `linear-gradient(90deg, rgba(34,211,238,0.45) 0%, rgba(167,139,250,0.55) ${value * 50}%, rgba(244,114,182,0.5) ${value * 100}%, rgba(15,23,42,0.2) ${value * 100}%, rgba(15,23,42,0.2) 100%)`
-      : `linear-gradient(90deg, rgba(34,211,238,0.55) 0%, rgba(167,139,250,0.65) ${value * 50}%, rgba(244,114,182,0.45) ${value * 100}%, rgba(15,23,42,0.25) ${value * 100}%, rgba(15,23,42,0.25) 100%)`;
+    variant === "evolveHero"
+      ? `linear-gradient(90deg, rgba(34,211,238,0.65) 0%, rgba(167,139,250,0.72) ${value * 50}%, rgba(244,114,182,0.62) ${value * 100}%, rgba(15,23,42,0.15) ${value * 100}%, rgba(15,23,42,0.15) 100%)`
+      : variant === "session"
+        ? `linear-gradient(90deg, rgba(34,211,238,0.45) 0%, rgba(167,139,250,0.55) ${value * 50}%, rgba(244,114,182,0.5) ${value * 100}%, rgba(15,23,42,0.2) ${value * 100}%, rgba(15,23,42,0.2) 100%)`
+        : `linear-gradient(90deg, rgba(34,211,238,0.55) 0%, rgba(167,139,250,0.65) ${value * 50}%, rgba(244,114,182,0.45) ${value * 100}%, rgba(15,23,42,0.25) ${value * 100}%, rgba(15,23,42,0.25) 100%)`;
 
-  const inputClass = variant === "session" ? INPUT_SESSION : INPUT_CARD;
+  const inputClass =
+    variant === "session"
+      ? INPUT_SESSION
+      : variant === "evolveHero"
+        ? INPUT_EVOLVE_HERO
+        : INPUT_CARD;
 
   return (
     <div
-      className={`relative ${isSession ? "min-h-[2.75rem]" : "min-h-[3.25rem]"} flex flex-col justify-center`}
+      className={`relative ${isEvolveHero ? "min-h-[4rem]" : isSession ? "min-h-[2.75rem]" : "min-h-[3.25rem]"} flex flex-col justify-center`}
     >
-      <div className="relative h-10 w-full shrink-0">
+      <div
+        className={`relative w-full shrink-0 ${isEvolveHero ? "h-14" : "h-10"}`}
+      >
         <span
           className={`pointer-events-none absolute inset-0 flex items-center justify-center font-black tabular-nums tracking-tight text-white select-none ${
-            isSession ? "text-3xl sm:text-4xl" : "text-4xl sm:text-5xl"
+            isEvolveHero
+              ? "text-5xl sm:text-6xl"
+              : isSession
+                ? "text-3xl sm:text-4xl"
+                : "text-4xl sm:text-5xl"
           }`}
           style={{
             opacity: 0.05 + value * 0.11,
@@ -158,7 +184,9 @@ export function NeuralImmersionSlider({
         </div>
 
         <div
-          className="pointer-events-none absolute left-0 right-0 top-1/2 z-0 h-2 -translate-y-1/2 rounded-full bg-slate-950/85"
+          className={`pointer-events-none absolute left-0 right-0 top-1/2 z-0 -translate-y-1/2 rounded-full bg-slate-950/85 ${
+            isEvolveHero ? "h-3" : "h-2"
+          }`}
           aria-hidden
         />
 
