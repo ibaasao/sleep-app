@@ -4,6 +4,7 @@ import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import type { MutableRefObject } from "react";
 import { useEffect, useRef } from "react";
 
+import type { Sound417Settings } from "@/components/Sound417DetailPanel";
 import { getBreathPulse, getSessionTheme, rgba } from "@/components/session/sessionTheme";
 import { getLockPullStrength } from "@/components/session/syncLockMotion";
 
@@ -31,6 +32,7 @@ type Props = {
   alignmentBurstAt: number | null;
   syncLocked: boolean;
   immersionRef: MutableRefObject<number>;
+  sound417SettingsRef?: MutableRefObject<Sound417Settings>;
   preSyncGate?: boolean;
 };
 
@@ -76,21 +78,32 @@ function getResonanceTarget(
   height: number,
   time: number,
   locked: boolean,
+  resonance = 0,
+  spatial = 0,
 ) {
   const breath = getBreathPulse(time + node.breathPhase * 180);
+  const motionTime = time * (1 + resonance * 1.35);
+  const amplitudeMul = 1 + resonance * 1.9;
+  const spreadMul = 1 + spatial * 0.3;
   const wave =
-    Math.sin(node.anchorX * Math.PI * 2.15 + time * 0.00042 + node.phase) *
+    Math.sin(node.anchorX * Math.PI * 2.15 + motionTime * 0.00042 + node.phase) *
       0.62 +
-    Math.sin(node.anchorX * Math.PI * 4.6 + node.phase * 1.4) * 0.2;
-  const driftX = Math.sin(time * 0.00033 + node.phase) * (locked ? 3.5 : 5.5);
-  const driftY = Math.cos(time * 0.00029 + node.breathPhase) * (locked ? 2.2 : 3.5);
+    Math.sin(node.anchorX * Math.PI * 4.6 + motionTime * 0.00022 + node.phase * 1.4) * 0.2;
+  const driftX =
+    Math.sin(motionTime * 0.00033 + node.phase) *
+    (locked ? 3.5 : 5.5) *
+    spreadMul;
+  const driftY =
+    Math.cos(motionTime * 0.00029 + node.breathPhase) *
+    (locked ? 2.2 : 3.5) *
+    amplitudeMul;
 
   return {
-    x: width * node.anchorX + driftX,
+    x: width * (0.5 + (node.anchorX - 0.5) * spreadMul) + driftX,
     y:
       height *
         (0.5 +
-          wave * (locked ? 0.1 : 0.14) * (0.68 + breath * 0.32)) +
+          wave * (locked ? 0.1 : 0.14) * amplitudeMul * (0.68 + breath * 0.32)) +
       driftY,
     breath,
   };
@@ -102,6 +115,7 @@ export function NeuralSynapseVisualizer({
   alignmentBurstAt,
   syncLocked,
   immersionRef,
+  sound417SettingsRef,
   preSyncGate = false,
 }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -137,7 +151,20 @@ export function NeuralSynapseVisualizer({
         soundId === "s3"
           ? Math.min(1, Math.max(0, immersionRef.current))
           : 0.355;
-      const synapseSpeed = 0.45 + immersion * 1.55;
+      const settings417 =
+        soundId === "s2" ? sound417SettingsRef?.current : undefined;
+      const resonance = settings417
+        ? Math.min(1, Math.max(0, settings417.resonanceIntensity))
+        : 0;
+      const texture = settings417
+        ? Math.min(1, Math.max(0, settings417.textureMix))
+        : 0;
+      const spatial = settings417
+        ? Math.min(1, Math.max(0, settings417.spatializer))
+        : 0;
+      const synapseSpeed =
+        0.45 + immersion * 1.55 + (soundId === "s2" ? resonance * 1.85 : 0);
+      const spatialGlow = soundId === "s2" ? spatial : 0;
       const pullStrength = getLockPullStrength(
         alignmentBurstAt,
         time,
@@ -153,7 +180,15 @@ export function NeuralSynapseVisualizer({
       context.fillRect(0, 0, width, height);
 
       for (const node of network.nodes) {
-        const target = getResonanceTarget(node, width, height, time, syncLocked);
+        const target = getResonanceTarget(
+          node,
+          width,
+          height,
+          time,
+          syncLocked,
+          soundId === "s2" ? resonance : 0,
+          spatialGlow,
+        );
 
         if (!reduceMotion) {
           if (pullStrength > 0.02 || syncLocked) {
@@ -197,15 +232,21 @@ export function NeuralSynapseVisualizer({
           (link.primary ? 0.16 : 0.08) +
           intensity * (link.primary ? 0.34 : 0.18);
 
+        context.save();
+        context.shadowColor = rgba(theme.accentRgb, 0.32 + spatialGlow * 0.38);
+        context.shadowBlur = 4 + spatialGlow * 22;
         context.beginPath();
         context.moveTo(from.x, from.y);
         context.quadraticCurveTo(midX, midY, to.x, to.y);
         context.strokeStyle = rgba(
           theme.lineRgb,
-          lineAlpha * (0.72 + pullStrength * 0.22),
+          lineAlpha * (0.72 + pullStrength * 0.22 + spatialGlow * 0.26),
         );
-        context.lineWidth = link.primary ? 1 + pullStrength * 0.35 : 0.8;
+        context.lineWidth = link.primary
+          ? 1 + pullStrength * 0.35 + spatialGlow * 1.25
+          : 0.8 + spatialGlow * 0.45;
         context.stroke();
+        context.restore();
 
         const particleT = link.pulse;
         const particleX =
@@ -230,11 +271,56 @@ export function NeuralSynapseVisualizer({
           Math.PI * 2,
         );
         context.fill();
+
+        if (soundId === "s2" && texture > 0.02 && link.primary) {
+          const sparkCount = 1 + Math.floor(texture * 5);
+          for (let spark = 0; spark < sparkCount; spark += 1) {
+            const seed = link.from * 12.9898 + spark * 78.233;
+            const t =
+              (particleT +
+                spark * 0.173 +
+                Math.sin(time * 0.00013 + seed) * 0.035 +
+                1) %
+              1;
+            const sx =
+              (1 - t) * (1 - t) * from.x + 2 * (1 - t) * t * midX + t * t * to.x;
+            const sy =
+              (1 - t) * (1 - t) * from.y + 2 * (1 - t) * t * midY + t * t * to.y;
+            const side = Math.sin(time * 0.002 + seed);
+            const offset = (6 + texture * 18) * side;
+            const normalLen = Math.max(1, Math.hypot(dx, dy));
+            const nx = -dy / normalLen;
+            const ny = dx / normalLen;
+            const twinkle = 0.35 + 0.65 * Math.sin(time * 0.006 + seed);
+
+            context.beginPath();
+            context.fillStyle = rgba(
+              theme.particleRgb,
+              texture * (0.12 + twinkle * 0.34),
+            );
+            context.arc(
+              sx + nx * offset,
+              sy + ny * offset,
+              0.55 + texture * 1.25 + twinkle * 0.45,
+              0,
+              Math.PI * 2,
+            );
+            context.fill();
+          }
+        }
       }
 
       for (const node of network.nodes) {
-        const target = getResonanceTarget(node, width, height, time, syncLocked);
-        const glow = 0.22 + target.breath * 0.2;
+        const target = getResonanceTarget(
+          node,
+          width,
+          height,
+          time,
+          syncLocked,
+          soundId === "s2" ? resonance : 0,
+          spatialGlow,
+        );
+        const glow = 0.22 + target.breath * 0.2 + spatialGlow * 0.18;
 
         const halo = context.createRadialGradient(
           node.x,
@@ -242,14 +328,14 @@ export function NeuralSynapseVisualizer({
           0,
           node.x,
           node.y,
-          11,
+          11 + spatialGlow * 10,
         );
         halo.addColorStop(0, rgba(theme.accentRgb, glow));
         halo.addColorStop(0.45, rgba(theme.primaryRgb, glow * 0.35));
         halo.addColorStop(1, rgba(theme.primaryRgb, 0));
         context.fillStyle = halo;
         context.beginPath();
-        context.arc(node.x, node.y, 11, 0, Math.PI * 2);
+        context.arc(node.x, node.y, 11 + spatialGlow * 10, 0, Math.PI * 2);
         context.fill();
 
         context.beginPath();
@@ -265,7 +351,13 @@ export function NeuralSynapseVisualizer({
           theme.primaryRgb,
           0.22 + target.breath * 0.18 + pullStrength * 0.12,
         );
-        context.arc(node.x, node.y, 5.5 + target.breath * 1.2, 0, Math.PI * 2);
+        context.arc(
+          node.x,
+          node.y,
+          5.5 + target.breath * 1.2 + spatialGlow * 1.8,
+          0,
+          Math.PI * 2,
+        );
         context.stroke();
       }
 
@@ -280,7 +372,16 @@ export function NeuralSynapseVisualizer({
       window.cancelAnimationFrame(frameId);
       window.removeEventListener("resize", resize);
     };
-  }, [active, alignmentBurstAt, immersionRef, reduceMotion, soundId, syncLocked, theme]);
+  }, [
+    active,
+    alignmentBurstAt,
+    immersionRef,
+    reduceMotion,
+    sound417SettingsRef,
+    soundId,
+    syncLocked,
+    theme,
+  ]);
 
   return (
     <AnimatePresence>

@@ -67,6 +67,49 @@ html.session-focus:not(:has(body.is-evolved)) [data-pre-sync-gate] {
   transition: opacity 0.45s ease;
 }
 
+.session-breath-button {
+  animation: session-breath-button-glow 8s ease-in-out infinite;
+  will-change: box-shadow, filter;
+}
+
+.session-breath-card {
+  animation: session-breath-card-glow 8s ease-in-out infinite;
+  will-change: border-color, box-shadow, background-color;
+}
+
+@keyframes session-breath-button-glow {
+  0%,
+  100% {
+    box-shadow:
+      0 0 14px -6px rgba(167, 139, 250, 0.35),
+      0 0 24px -12px rgba(244, 114, 182, 0.24);
+    filter: brightness(0.95);
+  }
+  50% {
+    box-shadow:
+      0 0 30px -4px rgba(167, 139, 250, 0.95),
+      0 0 58px -8px rgba(244, 114, 182, 0.62),
+      0 0 86px -20px rgba(129, 140, 248, 0.5);
+    filter: brightness(1.18);
+  }
+}
+
+@keyframes session-breath-card-glow {
+  0%,
+  100% {
+    border-color: rgba(139, 92, 246, 0.26);
+    background-color: rgba(139, 92, 246, 0.07);
+    box-shadow: 0 0 24px -18px rgba(167, 139, 250, 0.32);
+  }
+  50% {
+    border-color: rgba(196, 181, 253, 0.78);
+    background-color: rgba(139, 92, 246, 0.15);
+    box-shadow:
+      0 0 34px -10px rgba(167, 139, 250, 0.72),
+      inset 0 0 26px -18px rgba(244, 114, 182, 0.82);
+  }
+}
+
 html.session-focus[data-session-evolved="true"] body,
 html.session-focus:has(body.is-evolved) body {
   animation: none;

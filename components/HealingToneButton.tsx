@@ -103,6 +103,81 @@ type StartPlaybackOptions = {
   minutesOverride?: TimerMinutes;
 };
 
+type Sound417NativeGraph = {
+  context: AudioContext;
+  baseOsc: OscillatorNode;
+  noiseSource: AudioBufferSourceNode;
+  baseGain: GainNode;
+  dryGain: GainNode;
+  textureGain: GainNode;
+  spatialGain: GainNode;
+  masterGain: GainNode;
+  resonanceFilter: BiquadFilterNode;
+  textureFilter: BiquadFilterNode;
+  leftDelay: DelayNode;
+  rightDelay: DelayNode;
+  merger: ChannelMergerNode;
+};
+
+function clamp01(value: number): number {
+  return Math.min(1, Math.max(0, value));
+}
+
+function rampParam(
+  param: AudioParam,
+  context: BaseAudioContext,
+  value: number,
+  rampSec = 0.08,
+) {
+  const now = context.currentTime;
+  param.cancelScheduledValues(now);
+  param.setTargetAtTime(value, now, Math.max(0.006, rampSec / 3));
+}
+
+function createNoiseBuffer(context: AudioContext) {
+  const seconds = 2;
+  const buffer = context.createBuffer(
+    1,
+    Math.floor(context.sampleRate * seconds),
+    context.sampleRate,
+  );
+  const data = buffer.getChannelData(0);
+  let last = 0;
+  for (let i = 0; i < data.length; i += 1) {
+    const white = Math.random() * 2 - 1;
+    // 少し積分して、雨っぽい柔らかいノイズに寄せる。
+    last = last * 0.985 + white * 0.015;
+    data[i] = last * 2.7;
+  }
+  return buffer;
+}
+
+function applyNativeSound417Settings(
+  graph: Sound417NativeGraph,
+  settings: Sound417Settings,
+  rampSec = 0.08,
+) {
+  const r = clamp01(settings.resonanceIntensity);
+  const texture = clamp01(settings.textureMix);
+  const spatial = clamp01(settings.spatializer);
+  const { context } = graph;
+
+  graph.resonanceFilter.type = "bandpass";
+  rampParam(graph.resonanceFilter.frequency, context, 417, rampSec);
+  rampParam(graph.resonanceFilter.Q, context, 0.85 + r * 16, rampSec);
+  rampParam(graph.baseGain.gain, context, 0.055 + r * 0.055, rampSec);
+
+  graph.textureFilter.type = "lowpass";
+  rampParam(graph.textureFilter.frequency, context, 800 + texture * 4200, rampSec);
+  rampParam(graph.textureFilter.Q, context, 0.35 + texture * 1.2, rampSec);
+  rampParam(graph.textureGain.gain, context, texture ** 1.35 * 0.055, rampSec);
+
+  rampParam(graph.dryGain.gain, context, 1 - spatial * 0.28, rampSec);
+  rampParam(graph.spatialGain.gain, context, spatial * 0.72, rampSec);
+  rampParam(graph.leftDelay.delayTime, context, 0.002 + spatial * 0.009, rampSec);
+  rampParam(graph.rightDelay.delayTime, context, 0.009 + spatial * 0.044, rampSec);
+}
+
 type ToneType = "solfeggio" | "sleep";
 
 interface Sound {
@@ -323,6 +398,8 @@ function SessionControlButton() {
       onClick={() => void toggleSession()}
       whileTap={{ scale: 0.96 }}
       className={`touch-manipulation rounded-full font-bold tracking-wider outline-none ring-offset-2 ring-offset-[#0a0a0a] transition-[box-shadow,transform,colors] duration-100 ${
+        playing ? "session-breath-button" : ""
+      } ${
         playing
           ? isEvolved
             ? "bg-red-500/15 px-5 py-2.5 text-sm text-red-400 ring-2 ring-red-400/50 ring-offset-2 hover:bg-red-500/25"
@@ -369,7 +446,7 @@ export function HealingToneButton({
   onHeartSessionConsumed,
 }: HealingToneButtonProps) {
   const [playing, setPlaying] = useState(false);
-  const [selectedId, setSelectedId] = useState<string>("s3");
+  const [selectedId, setSelectedId] = useState<string>("s2");
   const [minutes, setMinutes] = useState<TimerMinutes>(30);
   const [remainingSec, setRemainingSec] = useState<number | null>(null);
   const [history, setHistory] = useState<SleepLogRow[]>([]);
@@ -390,7 +467,9 @@ export function HealingToneButton({
   const [sound417Settings, setSound417Settings] = useState<Sound417Settings>(
     DEFAULT_SOUND_417_SETTINGS,
   );
+  const sound417SettingsRef = useRef<Sound417Settings>(sound417Settings);
 
+  const nativeSound417Ref = useRef<Sound417NativeGraph | null>(null);
   const sourceRef = useRef<Tone.Oscillator | Tone.Noise | null>(null);
   const secondOscRef = useRef<Tone.Oscillator | null>(null);
   const thirdOscRef = useRef<Tone.Oscillator | null>(null);
@@ -427,6 +506,10 @@ export function HealingToneButton({
   >(null);
 
   const { isEvolved } = usePlaybackTimeManager(playing);
+
+  useEffect(() => {
+    sound417SettingsRef.current = sound417Settings;
+  }, [sound417Settings]);
 
   const [evolveAnimStartedAt, setEvolveAnimStartedAt] = useState<number | null>(
     null,
@@ -524,6 +607,21 @@ export function HealingToneButton({
   }, []);
 
   const disposeSources = useCallback(() => {
+    if (nativeSound417Ref.current) {
+      const graph = nativeSound417Ref.current;
+      try {
+        graph.baseOsc.stop();
+      } catch {
+        /* already stopped */
+      }
+      try {
+        graph.noiseSource.stop();
+      } catch {
+        /* already stopped */
+      }
+      void graph.context.close();
+      nativeSound417Ref.current = null;
+    }
     if (sourceRef.current) {
       sourceRef.current.stop();
       sourceRef.current.dispose();
@@ -616,6 +714,26 @@ export function HealingToneButton({
   }, [clearTimers, disposeSources, fetchHistory]);
 
   const beginFadeOut = useCallback(() => {
+    if (nativeSound417Ref.current) {
+      const graph = nativeSound417Ref.current;
+      stopScheduleRef.current = null;
+      const now = graph.context.currentTime;
+      graph.masterGain.gain.cancelScheduledValues(now);
+      graph.masterGain.gain.setTargetAtTime(0, now, FADE_SECONDS / 3);
+
+      fadeTimerRef.current = setTimeout(() => {
+        fadeTimerRef.current = null;
+        clearTimers();
+        disposeSources();
+        setPlaying(false);
+        setRemainingSec(null);
+        setSyncLocked(false);
+        setAlignmentBurstAt(null);
+        void fetchHistory();
+      }, FADE_SECONDS * 1000 + 120);
+      return;
+    }
+
     if (!sourceRef.current) return;
 
     stopScheduleRef.current = null;
@@ -637,6 +755,87 @@ export function HealingToneButton({
     }, FADE_SECONDS * 1000 + 120);
   }, [clearTimers, disposeSources, fetchHistory]);
 
+  const startNativeSound417Graph = useCallback(
+    async (settings: Sound417Settings, fadeInSec: number) => {
+      const AudioContextConstructor =
+        window.AudioContext ??
+        (window as typeof window & {
+          webkitAudioContext?: typeof AudioContext;
+        }).webkitAudioContext;
+
+      if (!AudioContextConstructor) {
+        throw new Error("このブラウザでは Web Audio API を利用できません。");
+      }
+
+      const context = new AudioContextConstructor();
+      await context.resume();
+
+      const baseOsc = context.createOscillator();
+      baseOsc.type = "sine";
+      baseOsc.frequency.setValueAtTime(417, context.currentTime);
+
+      const baseGain = context.createGain();
+      const resonanceFilter = context.createBiquadFilter();
+      const dryGain = context.createGain();
+      const spatialGain = context.createGain();
+      const leftDelay = context.createDelay(0.08);
+      const rightDelay = context.createDelay(0.08);
+      const merger = context.createChannelMerger(2);
+      const textureFilter = context.createBiquadFilter();
+      const textureGain = context.createGain();
+      const masterGain = context.createGain();
+
+      const noiseSource = context.createBufferSource();
+      noiseSource.buffer = createNoiseBuffer(context);
+      noiseSource.loop = true;
+
+      baseOsc.connect(baseGain);
+      baseGain.connect(resonanceFilter);
+      resonanceFilter.connect(dryGain);
+      resonanceFilter.connect(leftDelay);
+      resonanceFilter.connect(rightDelay);
+
+      leftDelay.connect(merger, 0, 0);
+      rightDelay.connect(merger, 0, 1);
+      merger.connect(spatialGain);
+
+      dryGain.connect(masterGain);
+      spatialGain.connect(masterGain);
+      noiseSource.connect(textureFilter);
+      textureFilter.connect(textureGain);
+      textureGain.connect(masterGain);
+      masterGain.connect(context.destination);
+
+      const graph: Sound417NativeGraph = {
+        context,
+        baseOsc,
+        noiseSource,
+        baseGain,
+        dryGain,
+        textureGain,
+        spatialGain,
+        masterGain,
+        resonanceFilter,
+        textureFilter,
+        leftDelay,
+        rightDelay,
+        merger,
+      };
+
+      applyNativeSound417Settings(graph, settings, 0.01);
+      masterGain.gain.setValueAtTime(0, context.currentTime);
+      masterGain.gain.linearRampToValueAtTime(
+        0.82,
+        context.currentTime + Math.max(0.02, fadeInSec),
+      );
+
+      baseOsc.start();
+      noiseSource.start();
+      nativeSound417Ref.current = graph;
+    },
+    [],
+  );
+
   const startPlayback = useCallback(async (opts?: StartPlaybackOptions) => {
     await Tone.start();
     // 👇 これを追加！フタを開ける（ミュート解除）
@@ -656,6 +855,27 @@ export function HealingToneButton({
 
     const durationMs = sessionMinutes * 60 * 1000;
     const waitMs = Math.max(0, durationMs - FADE_SECONDS * 1000);
+    const rawFadeIn = opts?.fadeInSec ?? 0;
+    const fadeInSec = rawFadeIn > 0.05 ? Math.min(rawFadeIn, 10) : 0;
+
+    if (sessionSound.id === "s2") {
+      await startNativeSound417Graph(sound417Settings, fadeInSec);
+
+      const playedAtIso = new Date().toISOString();
+      void recordSleepLogAtPlay(
+        playedAtIso,
+        buildNotesPayload(sessionSound, sessionMinutes),
+      );
+
+      endAtRef.current = Date.now() + durationMs;
+      setRemainingSec(Math.ceil(durationMs / 1000));
+      setPlaying(true);
+
+      stopScheduleRef.current = setTimeout(() => {
+        beginFadeOut();
+      }, waitMs);
+      return;
+    }
 
     const masterLpf = new Tone.Filter({
       type: "lowpass",
@@ -681,9 +901,6 @@ export function HealingToneButton({
     masterGainRef.current = masterGain;
 
     const t0 = Tone.now();
-    const rawFadeIn = opts?.fadeInSec ?? 0;
-    const fadeInSec = rawFadeIn > 0.05 ? Math.min(rawFadeIn, 10) : 0;
-
     masterLpf.frequency.setValueAtTime(MASTER_LPF_POST_HZ, t0);
 
     if (fadeInSec > 0.05) {
@@ -899,6 +1116,8 @@ export function HealingToneButton({
     beginFadeOut,
     clearTimers,
     disposeSources,
+    sound417Settings,
+    startNativeSound417Graph,
     neuralImmersion,
     modType,
     oscType,
@@ -919,6 +1138,12 @@ export function HealingToneButton({
     const id = window.setInterval(tick, 1000);
     return () => window.clearInterval(id);
   }, [playing]);
+
+  useEffect(() => {
+    const graph = nativeSound417Ref.current;
+    if (!playing || currentSound.id !== "s2" || !graph) return;
+    applyNativeSound417Settings(graph, sound417Settings, 0.09);
+  }, [sound417Settings, playing, currentSound.id]);
 
   /** 進化後: Breathe / Vibrate / Off の切替でゆらぎ LFO を作り直す */
   useEffect(() => {
@@ -1399,6 +1624,7 @@ export function HealingToneButton({
           alignmentBurstAt={alignmentBurstAt}
           syncLocked={syncLocked}
           immersionRef={neuralImmersionRef}
+          sound417SettingsRef={sound417SettingsRef}
         />
         <header className="mb-4 flex flex-col gap-3">
           <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
@@ -1665,6 +1891,8 @@ export function HealingToneButton({
           {playing ? (
             <motion.div
               className={`rounded-2xl border border-violet-500/30 bg-violet-500/10 ${
+                selectedId === "s2" ? "session-breath-card" : ""
+              } ${
                 syncLocked ? "mb-8 px-5 py-5" : "mb-4 px-4 py-3"
               }`}
               initial={{ opacity: 0, y: 8 }}
@@ -1676,6 +1904,12 @@ export function HealingToneButton({
               </p>
               <p className="mt-1 text-lg font-semibold text-white">{currentSound.label}</p>
               <p className="mt-1 text-xs text-slate-400">{currentSound.description}</p>
+              {selectedId === "s2" ? (
+                <Sound417DetailPanel
+                  settings={sound417Settings}
+                  onChange={setSound417Settings}
+                />
+              ) : null}
             </motion.div>
           ) : (
           <div className="grid min-h-0 flex-1 grid-cols-1 content-start gap-3 overflow-y-auto pb-4 min-[420px]:grid-cols-2">
