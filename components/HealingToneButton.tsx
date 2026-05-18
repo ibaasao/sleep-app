@@ -25,12 +25,15 @@ import {
   type QuickMoodSelection,
 } from "@/components/QuickMoodDiagnosis";
 import {
+  DEFAULT_SOUND_396_SETTINGS,
   DEFAULT_SOUND_417_SETTINGS,
+  Sound396DetailPanel,
   Sound417DetailPanel,
+  type Sound396Settings,
   type Sound417Settings,
 } from "@/components/Sound417DetailPanel";
 import type { HeartRateSessionPreset } from "@/components/HeartRateTest";
-import { motion } from "framer-motion";
+import { AnimatePresence, motion } from "framer-motion";
 import * as Tone from "tone";
 import {
   SESSION_EVOLVE_REVEAL_MS,
@@ -100,8 +103,99 @@ type TimerMinutes = (typeof TIMER_OPTIONS)[number];
 type StartPlaybackOptions = {
   fadeInSec?: number;
   soundId?: string;
+  blendSoundIds?: string[];
+  sound396SettingsOverride?: Sound396Settings;
   minutesOverride?: TimerMinutes;
 };
+
+type FearAdviceOption = {
+  id:
+    | "relationship"
+    | "future"
+    | "regret"
+    | "failure"
+    | "ambientStress";
+  label: string;
+  advice: string;
+  blendSoundIds: string[];
+  sound396Settings: Sound396Settings;
+  tuningMessage: string;
+};
+
+const FEAR_ADVICE_OPTIONS: FearAdviceOption[] = [
+  {
+    id: "relationship",
+    label: "人間関係の不安",
+    advice:
+      "396Hzで不安を和らげつつ、人間関係を向上させる【639Hz】を少し混ぜて聴くのがおすすめです。",
+    blendSoundIds: ["s4"],
+    sound396Settings: {
+      groundingDepth: 0.85,
+      releaseRate: 0.4,
+      wavePurify: 0.6,
+    },
+    tuningMessage:
+      "人間関係の不安をケアする音にチューニングしました。恐怖を解放する396Hzに、つながりを促す639Hzの波動をブレンドし、心を落ち着かせる安心感のある音に調整しています。",
+  },
+  {
+    id: "future",
+    label: "未来への焦り",
+    advice:
+      "396Hzで恐怖をほどきながら、変容と奇跡を促す【528Hz】を重ねて、焦りを前向きな一歩へ整えます。",
+    blendSoundIds: ["s3"],
+    sound396Settings: {
+      groundingDepth: 0.5,
+      releaseRate: 0.7,
+      wavePurify: 0.8,
+    },
+    tuningMessage:
+      "未来への焦りを和らげる音にチューニングしました。不安を確信に変える528Hzの奇跡の周波数をブレンドし、思考をクリアにして前進をサポートします。",
+  },
+  {
+    id: "regret",
+    label: "過去の後悔",
+    advice:
+      "396Hzで重たい記憶をゆるめつつ、変化と回復を促す【417Hz】を重ねて、過去から抜け出す流れを作ります。",
+    blendSoundIds: ["s2"],
+    sound396Settings: {
+      groundingDepth: 0.6,
+      releaseRate: 0.9,
+      wavePurify: 0.5,
+    },
+    tuningMessage:
+      "過去の後悔を洗い流す音にチューニングしました。変化を促す417Hzの波動を深くブレンドし、トラウマを手放して次の一歩を踏み出す浄化の響きにしています。",
+  },
+  {
+    id: "failure",
+    label: "失敗への恐怖",
+    advice:
+      "396Hzで失敗への恐れを解放し、表現力と問題解決を支える【741Hz】を重ねて、行動する勇気を引き出します。",
+    blendSoundIds: ["s5"],
+    sound396Settings: {
+      groundingDepth: 0.7,
+      releaseRate: 0.5,
+      wavePurify: 0.9,
+    },
+    tuningMessage:
+      "失敗への恐怖を克服する音にチューニングしました。問題解決や表現力を高める741Hzをブレンドし、内なる自信と本来の力を引き出す純粋な響きです。",
+  },
+  {
+    id: "ambientStress",
+    label: "漠然としたストレス",
+    advice:
+      "396Hzで緊張をほどきながら、直感と精神性を高める【852Hz】を重ねて、心のノイズを静かに整えます。",
+    blendSoundIds: ["s6"],
+    sound396Settings: {
+      groundingDepth: 0.4,
+      releaseRate: 0.8,
+      wavePurify: 0.7,
+    },
+    tuningMessage:
+      "漠然としたストレスをリセットする音にチューニングしました。直感を研ぎ澄ます852Hzのスピリチュアルな波動をブレンドし、雑音の多いマインドを深く癒やします。",
+  },
+];
+
+type BlendLayer = Tone.Oscillator | Tone.Noise;
 
 type Sound417NativeGraph = {
   context: AudioContext;
@@ -120,6 +214,7 @@ type Sound417NativeGraph = {
 };
 
 function clamp01(value: number): number {
+  if (!Number.isFinite(value)) return 0;
   return Math.min(1, Math.max(0, value));
 }
 
@@ -176,6 +271,50 @@ function applyNativeSound417Settings(
   rampParam(graph.spatialGain.gain, context, spatial * 0.72, rampSec);
   rampParam(graph.leftDelay.delayTime, context, 0.002 + spatial * 0.009, rampSec);
   rampParam(graph.rightDelay.delayTime, context, 0.009 + spatial * 0.044, rampSec);
+}
+
+function applySound396Settings({
+  settings,
+  main,
+  sub,
+  warmth,
+  releaseNoise,
+  masterLpf,
+  masterShelf,
+}: {
+  settings: Sound396Settings;
+  main: Tone.Oscillator | null;
+  sub: Tone.Oscillator | null;
+  warmth: Tone.Oscillator | null;
+  releaseNoise: Tone.Noise | null;
+  masterLpf: Tone.Filter | null;
+  masterShelf: Tone.Filter | null;
+}) {
+  const grounding = clamp01(settings.groundingDepth);
+  const release = clamp01(settings.releaseRate);
+  const purify = clamp01(settings.wavePurify);
+
+  main?.volume.rampTo(-16 + purify * 2.5, 0.12);
+  sub?.volume.rampTo(-42 + grounding * 24, 0.14);
+  warmth?.volume.rampTo(-38 + (1 - purify) * 22, 0.12);
+  releaseNoise?.volume.rampTo(-52 + release * 27, 0.18);
+
+  masterLpf?.frequency.rampTo(1250 + purify * 14500, 0.16);
+  masterShelf?.gain.rampTo(-1.8 + purify * 3.2, 0.14);
+}
+
+function safeRampToneParam(
+  param: { value: number; cancelScheduledValues: (time: number) => unknown; rampTo: (value: number, rampTime: number) => unknown },
+  value: number,
+  rampSec = 0.08,
+) {
+  const target = Number.isFinite(value) ? value : 0;
+  try {
+    param.cancelScheduledValues(Tone.now());
+    param.rampTo(target, rampSec);
+  } catch {
+    param.value = target;
+  }
 }
 
 type ToneType = "solfeggio" | "sleep";
@@ -464,6 +603,16 @@ export function HealingToneButton({
   const [quickPortalTarget, setQuickPortalTarget] = useState<
     HTMLElement | "missing" | null
   >(null);
+  const [fearAdviceOpen, setFearAdviceOpen] = useState(false);
+  const [selectedFearAdvice, setSelectedFearAdvice] =
+    useState<FearAdviceOption | null>(null);
+  const [fearAdviceStarting, setFearAdviceStarting] = useState(false);
+  const [sound396Settings, setSound396Settings] = useState<Sound396Settings>(
+    DEFAULT_SOUND_396_SETTINGS,
+  );
+  const [sound396TuningMessage, setSound396TuningMessage] = useState<
+    string | null
+  >(null);
   const [sound417Settings, setSound417Settings] = useState<Sound417Settings>(
     DEFAULT_SOUND_417_SETTINGS,
   );
@@ -475,6 +624,7 @@ export function HealingToneButton({
   const thirdOscRef = useRef<Tone.Oscillator | null>(null);
   /** メインより DEPTH_DETUNE_HZ だけ高い周波数で重ねるレイヤー（ノイズ時は未使用） */
   const depthOscRef = useRef<Tone.Oscillator | null>(null);
+  const blendLayersRef = useRef<BlendLayer[]>([]);
   const reverbRef = useRef<Tone.Reverb | null>(null);
   /** Pink Noise 用ローパス（他ノイズ・トーンでは未使用） */
   const noiseFilterRef = useRef<Tone.Filter | null>(null);
@@ -516,6 +666,7 @@ export function HealingToneButton({
   );
   const evolveHeroDoneRef = useRef(false);
   const [evolveHeroGate, setEvolveHeroGate] = useState(false);
+  const releaseNoiseRef = useRef<Tone.Noise | null>(null);
 
   useEffect(() => {
     if (!playing) {
@@ -563,9 +714,9 @@ export function HealingToneButton({
     const shelf = masterShelfRef.current;
     if (!shelf || !playing) return;
     if (selectedId === "s3") {
-      shelf.gain.rampTo(shelfGainDbFor528Osc(oscType), 0.1);
+      safeRampToneParam(shelf.gain, shelfGainDbFor528Osc(oscType), 0.1);
     } else {
-      shelf.gain.rampTo(0, 0.08);
+      safeRampToneParam(shelf.gain, 0, 0.08);
     }
   }, [oscType, playing, selectedId]);
 
@@ -642,6 +793,16 @@ export function HealingToneButton({
       depthOscRef.current.dispose();
       depthOscRef.current = null;
     }
+    if (releaseNoiseRef.current) {
+      releaseNoiseRef.current.stop();
+      releaseNoiseRef.current.dispose();
+      releaseNoiseRef.current = null;
+    }
+    for (const layer of blendLayersRef.current) {
+      layer.stop();
+      layer.dispose();
+    }
+    blendLayersRef.current = [];
     if (oceanAutoFilterRef.current) {
       oceanAutoFilterRef.current.stop();
       oceanAutoFilterRef.current.dispose();
@@ -742,6 +903,10 @@ export function HealingToneButton({
     secondOscRef.current?.volume.rampTo(-80, FADE_SECONDS);
     thirdOscRef.current?.volume.rampTo(-80, FADE_SECONDS);
     depthOscRef.current?.volume.rampTo(-80, FADE_SECONDS);
+    releaseNoiseRef.current?.volume.rampTo(-80, FADE_SECONDS);
+    for (const layer of blendLayersRef.current) {
+      layer.volume.rampTo(-80, FADE_SECONDS);
+    }
 
     fadeTimerRef.current = setTimeout(() => {
       fadeTimerRef.current = null;
@@ -832,6 +997,50 @@ export function HealingToneButton({
       baseOsc.start();
       noiseSource.start();
       nativeSound417Ref.current = graph;
+    },
+    [],
+  );
+
+  const createFearBlendLayer = useCallback(
+    (soundId: string, destination: Tone.ToneAudioNode): BlendLayer | null => {
+      if (soundId === "s2") {
+        const osc = new Tone.Oscillator(417, "sine").connect(destination);
+        osc.volume.value = -23;
+        return osc;
+      }
+      if (soundId === "s3") {
+        const osc = new Tone.Oscillator(528, "sine").connect(destination);
+        osc.volume.value = -23;
+        return osc;
+      }
+      if (soundId === "s4") {
+        const osc = new Tone.Oscillator(639, "sine").connect(destination);
+        osc.volume.value = -22;
+        return osc;
+      }
+      if (soundId === "s5") {
+        const osc = new Tone.Oscillator(741, "sine").connect(destination);
+        osc.volume.value = -24;
+        return osc;
+      }
+      if (soundId === "s6") {
+        const osc = new Tone.Oscillator(852, "sine").connect(destination);
+        osc.volume.value = -25;
+        return osc;
+      }
+      if (soundId === "n3") {
+        const osc = new Tone.Oscillator(BINAURAL_BASE_FREQ_HZ, "triangle").connect(
+          destination,
+        );
+        osc.volume.value = -31;
+        return osc;
+      }
+      if (soundId === "n2") {
+        const noise = new Tone.Noise("pink").connect(destination);
+        noise.volume.value = -35;
+        return noise;
+      }
+      return null;
     },
     [],
   );
@@ -1079,6 +1288,34 @@ export function HealingToneButton({
       oscR.volume.value = -30;
       sourceRef.current = oscL;
       secondOscRef.current = oscR;
+    } else if (sessionSound.id === "s1") {
+      const active396Settings =
+        opts?.sound396SettingsOverride ?? sound396Settings;
+      const main = new Tone.Oscillator(396, "sine").connect(reverb);
+      const sub = new Tone.Oscillator(198, "sine").connect(reverb);
+      const warmth = new Tone.Oscillator(792, "triangle").connect(reverb);
+      const releaseFilter = new Tone.Filter({
+        type: "lowpass",
+        frequency: 1800,
+        rolloff: -24,
+      }).connect(reverb);
+      const releaseNoise = new Tone.Noise("pink").connect(releaseFilter);
+
+      sourceRef.current = main;
+      secondOscRef.current = sub;
+      thirdOscRef.current = warmth;
+      releaseNoiseRef.current = releaseNoise;
+      noiseFilterRef.current = releaseFilter;
+
+      applySound396Settings({
+        settings: active396Settings,
+        main,
+        sub,
+        warmth,
+        releaseNoise,
+        masterLpf,
+        masterShelf,
+      });
     } else {
       const f = sessionSound.freq!;
       const osc = new Tone.Oscillator(f, "sine").connect(reverb);
@@ -1092,11 +1329,22 @@ export function HealingToneButton({
       depthOscRef.current = depth;
     }
 
+    if (sessionSound.id === "s1" && opts?.blendSoundIds?.length) {
+      const layers = opts.blendSoundIds
+        .map((id) => createFearBlendLayer(id, reverb))
+        .filter((layer): layer is BlendLayer => layer != null);
+      blendLayersRef.current = layers;
+    }
+
     const playedAtIso = new Date().toISOString();
     sourceRef.current.start();
     secondOscRef.current?.start();
     thirdOscRef.current?.start();
     depthOscRef.current?.start();
+    releaseNoiseRef.current?.start();
+    for (const layer of blendLayersRef.current) {
+      layer.start();
+    }
 
     void recordSleepLogAtPlay(
       playedAtIso,
@@ -1116,6 +1364,8 @@ export function HealingToneButton({
     beginFadeOut,
     clearTimers,
     disposeSources,
+    createFearBlendLayer,
+    sound396Settings,
     sound417Settings,
     startNativeSound417Graph,
     neuralImmersion,
@@ -1144,6 +1394,20 @@ export function HealingToneButton({
     if (!playing || currentSound.id !== "s2" || !graph) return;
     applyNativeSound417Settings(graph, sound417Settings, 0.09);
   }, [sound417Settings, playing, currentSound.id]);
+
+  useEffect(() => {
+    if (!playing || currentSound.id !== "s1") return;
+    applySound396Settings({
+      settings: sound396Settings,
+      main:
+        sourceRef.current instanceof Tone.Oscillator ? sourceRef.current : null,
+      sub: secondOscRef.current,
+      warmth: thirdOscRef.current,
+      releaseNoise: releaseNoiseRef.current,
+      masterLpf: masterLpfRef.current,
+      masterShelf: masterShelfRef.current,
+    });
+  }, [sound396Settings, playing, currentSound.id]);
 
   /** 進化後: Breathe / Vibrate / Off の切替でゆらぎ LFO を作り直す */
   useEffect(() => {
@@ -1476,6 +1740,54 @@ export function HealingToneButton({
     pauseSessionModulationForLock();
   }, [pauseSessionModulationForLock]);
 
+  const openFearAdviceModal = useCallback(() => {
+    if (playing) return;
+    setSelectedId("s1");
+    setSelectedFearAdvice(null);
+    setFearAdviceOpen(true);
+  }, [playing]);
+
+  const closeFearAdviceModal = useCallback(() => {
+    setFearAdviceOpen(false);
+    setSelectedFearAdvice(null);
+    setFearAdviceStarting(false);
+  }, []);
+
+  const startFearAdviceSession = useCallback((option?: FearAdviceOption) => {
+    const advice = option ?? selectedFearAdvice;
+    if (!advice || playing || fearAdviceStarting) return;
+
+    setSelectedFearAdvice(advice);
+    setFearAdviceStarting(true);
+    setSelectedId("s1");
+    setSound396Settings(advice.sound396Settings);
+    setSound396TuningMessage(advice.tuningMessage);
+    setActiveFrequency(396);
+    setQuickFeedback(
+      `396Hz セッションを開始します。${advice.advice}`,
+    );
+    setFearAdviceOpen(false);
+    setLaunchBurst(true);
+    setAlignmentBurstAt(null);
+    setSyncLocked(false);
+    void (async () => {
+      try {
+        await startPlayback({
+          soundId: "s1",
+          blendSoundIds: advice.blendSoundIds,
+          sound396SettingsOverride: advice.sound396Settings,
+        });
+      } catch (e) {
+        console.error("[FearAdviceSession]", e);
+        setQuickFeedback(null);
+        setActiveFrequency(null);
+        setLaunchBurst(false);
+      } finally {
+        setFearAdviceStarting(false);
+      }
+    })();
+  }, [fearAdviceStarting, playing, selectedFearAdvice, startPlayback]);
+
   useLayoutEffect(() => {
     document.documentElement.classList.toggle("session-focus", playing);
     document.documentElement.classList.toggle("session-lock-focus", syncLocked);
@@ -1533,6 +1845,111 @@ export function HealingToneButton({
       />
       <SyncLockFlash burstAt={alignmentBurstAt} />
       <SessionLaunchBurst active={launchBurst} />
+      <AnimatePresence>
+        {fearAdviceOpen ? (
+          <motion.div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4 backdrop-blur-md"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.22, ease: "easeOut" }}
+            role="dialog"
+            aria-modal="true"
+            aria-label="396Hz 周波数の組み合わせアドバイス"
+            onMouseDown={closeFearAdviceModal}
+          >
+            <motion.div
+              className="relative w-full max-w-lg overflow-hidden rounded-3xl border border-red-300/25 bg-gradient-to-b from-slate-950 via-red-950/20 to-slate-950 p-5 text-slate-100 shadow-[0_0_60px_-18px_rgba(248,113,113,0.7)] sm:p-6"
+              initial={{ opacity: 0, y: 18, scale: 0.96 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 10, scale: 0.98 }}
+              transition={{ duration: 0.34, ease: [0.22, 1, 0.36, 1] }}
+              onMouseDown={(e) => e.stopPropagation()}
+            >
+              <div
+                className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_50%_0%,rgba(248,113,113,0.16),transparent_48%)]"
+                aria-hidden
+              />
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={closeFearAdviceModal}
+                  className="absolute right-0 top-0 rounded-full border border-slate-700/80 bg-slate-950/70 px-2 py-1 text-xs text-slate-400 transition hover:border-red-300/40 hover:text-red-100"
+                  aria-label="閉じる"
+                >
+                  Close
+                </button>
+                <p className="text-[10px] font-bold uppercase tracking-[0.28em] text-red-200/75">
+                  396 Hz Fear Release
+                </p>
+                <h2 className="mt-2 pr-16 text-xl font-semibold tracking-tight text-white">
+                  選択してください
+                </h2>
+                <p className="mt-2 text-xs leading-relaxed text-slate-400">
+                  選択に合わせて、396Hzと相性の良い周波数の組み合わせを提案します。
+                </p>
+
+                <div className="mt-5 grid gap-2">
+                  {FEAR_ADVICE_OPTIONS.map((option) => {
+                    const isSelected = selectedFearAdvice?.id === option.id;
+                    return (
+                      <button
+                        key={option.id}
+                        type="button"
+                        onClick={() => startFearAdviceSession(option)}
+                        disabled={playing || fearAdviceStarting}
+                        className={`touch-manipulation rounded-2xl border px-4 py-3 text-left text-sm transition ${
+                          isSelected
+                            ? "border-red-300/70 bg-red-400/15 text-red-50 shadow-[0_0_28px_-12px_rgba(248,113,113,0.75)]"
+                            : "border-slate-800 bg-slate-900/45 text-slate-300 hover:border-red-300/35 hover:bg-red-950/20"
+                        } disabled:cursor-not-allowed disabled:opacity-70`}
+                      >
+                        {option.label}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                <AnimatePresence mode="wait">
+                  {selectedFearAdvice ? (
+                    <motion.div
+                      key={selectedFearAdvice.id}
+                      className="mt-5 rounded-2xl border border-red-200/20 bg-black/25 p-4"
+                      initial={{ opacity: 0, y: 10, filter: "blur(6px)" }}
+                      animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
+                      exit={{ opacity: 0, y: -6, filter: "blur(6px)" }}
+                      transition={{ duration: 0.48, ease: "easeOut" }}
+                    >
+                      <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-red-200/70">
+                        周波数の組み合わせアドバイス
+                      </p>
+                      <p className="mt-2 text-sm leading-relaxed text-red-50/90">
+                        {selectedFearAdvice.advice}
+                      </p>
+                      <button
+                        type="button"
+                        onClick={
+                          playing
+                            ? closeFearAdviceModal
+                            : () => startFearAdviceSession(selectedFearAdvice)
+                        }
+                        disabled={fearAdviceStarting}
+                        className="mt-4 w-full rounded-xl bg-gradient-to-r from-red-500 to-orange-500 px-4 py-3 text-sm font-bold text-white shadow-[0_0_28px_-8px_rgba(251,146,60,0.75)] transition hover:from-red-400 hover:to-orange-400 active:scale-[0.98]"
+                      >
+                        {playing
+                          ? "セッション開始済み（閉じる）"
+                          : fearAdviceStarting
+                            ? "セッションを準備中..."
+                            : "セッションを開始する"}
+                      </button>
+                    </motion.div>
+                  ) : null}
+                </AnimatePresence>
+              </div>
+            </motion.div>
+          </motion.div>
+        ) : null}
+      </AnimatePresence>
       {quickPortalTarget != null && quickPortalTarget !== "missing"
         ? createPortal(quickMoodNode, quickPortalTarget)
         : null}
@@ -1904,6 +2321,13 @@ export function HealingToneButton({
               </p>
               <p className="mt-1 text-lg font-semibold text-white">{currentSound.label}</p>
               <p className="mt-1 text-xs text-slate-400">{currentSound.description}</p>
+              {selectedId === "s1" ? (
+                <Sound396DetailPanel
+                  settings={sound396Settings}
+                  onChange={setSound396Settings}
+                  tuningMessage={sound396TuningMessage}
+                />
+              ) : null}
               {selectedId === "s2" ? (
                 <Sound417DetailPanel
                   settings={sound417Settings}
@@ -1915,9 +2339,10 @@ export function HealingToneButton({
           <div className="grid min-h-0 flex-1 grid-cols-1 content-start gap-3 overflow-y-auto pb-4 min-[420px]:grid-cols-2">
             {SOUND_LIST.map((s) => {
               const isSelected = selectedId === s.id;
+              const is396 = s.id === "s1";
               const is417 = s.id === "s2";
 
-              if (is417) {
+              if (is396 || is417) {
                 return (
                   <div
                     key={s.id}
@@ -1942,10 +2367,27 @@ export function HealingToneButton({
                         onPointerDown={(e) => e.stopPropagation()}
                         onClick={(e) => e.stopPropagation()}
                       >
-                        <Sound417DetailPanel
-                          settings={sound417Settings}
-                          onChange={setSound417Settings}
-                        />
+                        {is396 ? (
+                          <>
+                            <Sound396DetailPanel
+                              settings={sound396Settings}
+                              onChange={setSound396Settings}
+                              tuningMessage={sound396TuningMessage}
+                            />
+                            <button
+                              type="button"
+                              onClick={openFearAdviceModal}
+                              className="mt-3 w-full rounded-xl border border-violet-400/30 bg-violet-500/10 px-3 py-2.5 text-xs font-semibold text-violet-100 transition hover:bg-violet-500/20"
+                            >
+                              あなたの恐れは❓
+                            </button>
+                          </>
+                        ) : (
+                          <Sound417DetailPanel
+                            settings={sound417Settings}
+                            onChange={setSound417Settings}
+                          />
+                        )}
                       </div>
                     ) : null}
                   </div>
@@ -1956,7 +2398,13 @@ export function HealingToneButton({
                 <button
                   key={s.id}
                   type="button"
-                  onClick={() => setSelectedId(s.id)}
+                  onClick={() => {
+                    if (s.id === "s1") {
+                      openFearAdviceModal();
+                      return;
+                    }
+                    setSelectedId(s.id);
+                  }}
                   disabled={playing}
                   className={`touch-manipulation rounded-lg border p-3 text-left transition-[transform,colors,box-shadow] duration-100 will-change-transform hover:border-slate-600 active:scale-[0.985] disabled:cursor-not-allowed sm:p-4 ${
                     isSelected

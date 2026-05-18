@@ -6,11 +6,65 @@ export type Sound417Settings = {
   spatializer: number;
 };
 
+export type Sound396Settings = {
+  groundingDepth: number;
+  releaseRate: number;
+  wavePurify: number;
+};
+
 export const DEFAULT_SOUND_417_SETTINGS: Sound417Settings = {
   resonanceIntensity: 0.55,
   textureMix: 0.35,
   spatializer: 0.5,
 };
+
+export const DEFAULT_SOUND_396_SETTINGS: Sound396Settings = {
+  groundingDepth: 0.56,
+  releaseRate: 0.28,
+  wavePurify: 0.72,
+};
+
+type ParamConfig<TSettings> = {
+  id: keyof TSettings;
+  label: string;
+  sublabel: string;
+};
+
+const PARAM_CONFIG_417: ParamConfig<Sound417Settings>[] = [
+  {
+    id: "resonanceIntensity",
+    label: "Resonance Intensity",
+    sublabel: "共鳴の強さ",
+  },
+  {
+    id: "textureMix",
+    label: "Texture Mix",
+    sublabel: "環境音の混ざり具合",
+  },
+  {
+    id: "spatializer",
+    label: "Spatializer",
+    sublabel: "音の広がり",
+  },
+];
+
+const PARAM_CONFIG_396: ParamConfig<Sound396Settings>[] = [
+  {
+    id: "groundingDepth",
+    label: "Grounding Depth",
+    sublabel: "土台の安定感",
+  },
+  {
+    id: "releaseRate",
+    label: "Release Rate",
+    sublabel: "解放の度合い",
+  },
+  {
+    id: "wavePurify",
+    label: "Wave Purify",
+    sublabel: "音の純度",
+  },
+];
 
 type SliderRowProps = {
   label: string;
@@ -68,39 +122,94 @@ type Sound417DetailPanelProps = {
   disabled?: boolean;
 };
 
+type Sound396DetailPanelProps = {
+  settings: Sound396Settings;
+  onChange: (next: Sound396Settings) => void;
+  tuningMessage?: string | null;
+  disabled?: boolean;
+};
+
+type DetailPanelProps<TSettings extends Record<string, number>> = {
+  title: string;
+  settings: TSettings;
+  params: ParamConfig<TSettings>[];
+  onChange: (next: TSettings) => void;
+  tuningMessage?: string | null;
+  disabled?: boolean;
+};
+
+function SoundDetailPanel<TSettings extends Record<string, number>>({
+  title,
+  settings,
+  params,
+  onChange,
+  tuningMessage,
+  disabled,
+}: DetailPanelProps<TSettings>) {
+  return (
+    <div className="mt-3 space-y-4 border-t border-violet-500/25 pt-3">
+      <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-violet-300/80">
+        {title}
+      </p>
+      {tuningMessage ? (
+        <div className="rounded-2xl border border-violet-300/20 bg-violet-500/10 px-3 py-3 shadow-[0_0_24px_-16px_rgba(167,139,250,0.9)]">
+          <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-violet-200/80">
+            Tuning Insight
+          </p>
+          <p className="mt-1.5 text-[11px] leading-relaxed text-violet-50/85">
+            {tuningMessage}
+          </p>
+        </div>
+      ) : null}
+      {params.map((param) => (
+        <SliderRow
+          key={String(param.id)}
+          label={param.label}
+          sublabel={param.sublabel}
+          value={settings[param.id]}
+          onChange={(value) =>
+            onChange({
+              ...settings,
+              [param.id]: value,
+            })
+          }
+          disabled={disabled}
+        />
+      ))}
+    </div>
+  );
+}
+
 export function Sound417DetailPanel({
   settings,
   onChange,
   disabled,
 }: Sound417DetailPanelProps) {
   return (
-    <div className="mt-3 space-y-4 border-t border-violet-500/25 pt-3">
-      <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-violet-300/80">
-        417 Hz — Detail
-      </p>
-      <SliderRow
-        label="Resonance Intensity"
-        sublabel="共鳴の強さ"
-        value={settings.resonanceIntensity}
-        onChange={(resonanceIntensity) =>
-          onChange({ ...settings, resonanceIntensity })
-        }
-        disabled={disabled}
-      />
-      <SliderRow
-        label="Texture Mix"
-        sublabel="環境音の混ざり具合"
-        value={settings.textureMix}
-        onChange={(textureMix) => onChange({ ...settings, textureMix })}
-        disabled={disabled}
-      />
-      <SliderRow
-        label="Spatializer"
-        sublabel="音の広がり"
-        value={settings.spatializer}
-        onChange={(spatializer) => onChange({ ...settings, spatializer })}
-        disabled={disabled}
-      />
-    </div>
+    <SoundDetailPanel
+      title="417 Hz — Detail"
+      settings={settings}
+      params={PARAM_CONFIG_417}
+      onChange={onChange}
+      disabled={disabled}
+    />
+  );
+}
+
+export function Sound396DetailPanel({
+  settings,
+  onChange,
+  tuningMessage,
+  disabled,
+}: Sound396DetailPanelProps) {
+  return (
+    <SoundDetailPanel
+      title="396 Hz — Fear Release Detail"
+      settings={settings}
+      params={PARAM_CONFIG_396}
+      onChange={onChange}
+      tuningMessage={tuningMessage}
+      disabled={disabled}
+    />
   );
 }

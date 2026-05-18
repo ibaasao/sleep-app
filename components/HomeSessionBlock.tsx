@@ -25,12 +25,12 @@ export function HomeSessionBlock({ email }: Props) {
 
   return (
     <>
-      <HeartRateTest className="mt-2" onSessionStart={onSessionStart} />
       <HealingToneButton
         email={email}
         heartSessionPreset={heartSessionPreset}
         onHeartSessionConsumed={onHeartSessionConsumed}
       />
+      <HeartRateTest className="mt-2" onSessionStart={onSessionStart} />
     </>
   );
 }
