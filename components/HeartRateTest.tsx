@@ -5,7 +5,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 const SAMPLE_W = 72;
 const SAMPLE_H = 54;
-const MEASURE_MS = 3000;
+const MEASURE_MS = 5000;
 const MIN_PEAK_INTERVAL_MS = 380;
 
 export type HeartRateSessionPreset = {
@@ -77,6 +77,45 @@ function computeBpmFromPeaks(peaks: number[]): {
   return { bpm: Math.min(220, Math.max(40, bpm)), reliable: true };
 }
 
+type HeartScanMetrics = {
+  bpm: number;
+  fluctuationMs: number;
+  amplitude: number;
+  reliable: boolean;
+};
+
+function computeHeartScanMetrics(
+  peaks: number[],
+  rawSignals: number[],
+): HeartScanMetrics {
+  const sortedPeaks = [...peaks].sort((a, b) => a - b);
+  const bpmFromPeaks =
+    sortedPeaks.length > 0
+      ? Math.round((sortedPeaks.length / (MEASURE_MS / 1000)) * 60)
+      : 72;
+
+  const intervals: number[] = [];
+  for (let i = 1; i < sortedPeaks.length; i += 1) {
+    const d = sortedPeaks[i] - sortedPeaks[i - 1];
+    if (d >= 300 && d <= 2000) intervals.push(d);
+  }
+
+  const fluctuationMs =
+    intervals.length >= 2 ? Math.max(...intervals) - Math.min(...intervals) : 0;
+
+  const amplitude =
+    rawSignals.length >= 2
+      ? Math.max(...rawSignals) - Math.min(...rawSignals)
+      : 0;
+
+  return {
+    bpm: Math.min(220, Math.max(40, bpmFromPeaks)),
+    fluctuationMs: Math.round(fluctuationMs),
+    amplitude: Math.round(amplitude * 10) / 10,
+    reliable: sortedPeaks.length >= 2 && rawSignals.length > 10,
+  };
+}
+
 export function HeartRateTest({ className = "", onSessionStart }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -90,6 +129,7 @@ export function HeartRateTest({ className = "", onSessionStart }: Props) {
   const lastPeakTimeRef = useRef(0);
   const measureStartRef = useRef(0);
   const measurementPeaksRef = useRef<number[]>([]);
+  const rawSignalsRef = useRef<number[]>([]);
 
   const pulseVisualRef = useRef(0);
   const ringRef = useRef<HTMLDivElement>(null);
@@ -103,6 +143,7 @@ export function HeartRateTest({ className = "", onSessionStart }: Props) {
 
   const [resultBpm, setResultBpm] = useState<number | null>(null);
   const [bpmReliable, setBpmReliable] = useState(true);
+  const [scanMetrics, setScanMetrics] = useState<HeartScanMetrics | null>(null);
   const [resultPreset, setResultPreset] = useState<HeartRateSessionPreset | null>(
     null,
   );
@@ -160,10 +201,12 @@ export function HeartRateTest({ className = "", onSessionStart }: Props) {
     setPhase("idle");
     setCountdown(null);
     setResultBpm(null);
+    setScanMetrics(null);
     setResultPreset(null);
     setBpmReliable(true);
     resetVisualRing();
     measurementPeaksRef.current = [];
+    rawSignalsRef.current = [];
     countdownSecRef.current = null;
     prevAcRef.current = 0;
     prevPrevAcRef.current = 0;
@@ -180,7 +223,8 @@ export function HeartRateTest({ className = "", onSessionStart }: Props) {
     const peaks = measurementPeaksRef.current.filter(
       (t) => t >= start && t <= start + MEASURE_MS,
     );
-    const { bpm, reliable } = computeBpmFromPeaks(peaks);
+    const metrics = computeHeartScanMetrics(peaks, rawSignalsRef.current);
+    const { bpm, reliable } = metrics;
     const rec = recommendFromBpm(bpm);
     const preset: HeartRateSessionPreset = {
       ...rec,
@@ -190,6 +234,7 @@ export function HeartRateTest({ className = "", onSessionStart }: Props) {
 
     setResultBpm(bpm);
     setBpmReliable(reliable);
+    setScanMetrics(metrics);
     setResultPreset(preset);
     setPhase("result");
     setCountdown(null);
@@ -221,7 +266,7 @@ export function HeartRateTest({ className = "", onSessionStart }: Props) {
     }
 
     const secLeft = Math.ceil((MEASURE_MS - elapsed) / 1000);
-    const cd = Math.min(3, Math.max(1, secLeft));
+    const cd = Math.min(5, Math.max(1, secLeft));
     if (countdownSecRef.current !== cd) {
       countdownSecRef.current = cd;
       setCountdown(cd);
@@ -236,6 +281,7 @@ export function HeartRateTest({ className = "", onSessionStart }: Props) {
       sumR += data[i];
     }
     const avgR = sumR / n;
+    rawSignalsRef.current.push(avgR);
 
     const trendAlpha = 0.04;
     emaTrendRef.current =
@@ -290,6 +336,7 @@ export function HeartRateTest({ className = "", onSessionStart }: Props) {
   const startMeasure = useCallback(async () => {
     setError(null);
     setResultBpm(null);
+    setScanMetrics(null);
     setResultPreset(null);
 
     if (!navigator.mediaDevices?.getUserMedia) {
@@ -336,6 +383,7 @@ export function HeartRateTest({ className = "", onSessionStart }: Props) {
       setTorchOn(torchEnabled);
 
       measurementPeaksRef.current = [];
+      rawSignalsRef.current = [];
       prevAcRef.current = 0;
       prevPrevAcRef.current = 0;
       emaTrendRef.current = 0;
@@ -344,7 +392,7 @@ export function HeartRateTest({ className = "", onSessionStart }: Props) {
       measureStartRef.current = performance.now();
       pulseVisualRef.current = 0;
       countdownSecRef.current = null;
-      setCountdown(3);
+      setCountdown(5);
       setPhase("measuring");
       rafRef.current = requestAnimationFrame(tick);
     } catch (e) {
@@ -387,7 +435,7 @@ export function HeartRateTest({ className = "", onSessionStart }: Props) {
         心拍から周波数提案
       </h2>
       <p className="mt-2 text-xs leading-relaxed text-slate-400">
-        「測定スタート」後、3・2・1のカウントに合わせて約3秒間、指で背面レンズを軽く覆ってください。赤チャンネルの波から平均BPMを推定し、おすすめの周波数を表示します。
+        「測定スタート」後、5・4・3・2・1のカウントに合わせて約5秒間、指で背面レンズを軽く覆ってください。赤チャンネルの波から平均BPMを推定し、おすすめの周波数を表示します。
       </p>
 
       {error ? (
@@ -477,6 +525,34 @@ export function HeartRateTest({ className = "", onSessionStart }: Props) {
                     {resultPreset.advisoryMessage}
                   </p>
                 </>
+              ) : null}
+              {scanMetrics ? (
+                <div className="mt-5 grid grid-cols-3 gap-2 text-left">
+                  <div className="rounded-xl border border-violet-400/20 bg-violet-500/10 px-3 py-2">
+                    <p className="text-[9px] font-bold uppercase tracking-[0.16em] text-violet-300/80">
+                      BPM
+                    </p>
+                    <p className="mt-1 font-mono text-sm text-white">
+                      {scanMetrics.bpm}
+                    </p>
+                  </div>
+                  <div className="rounded-xl border border-cyan-400/20 bg-cyan-500/10 px-3 py-2">
+                    <p className="text-[9px] font-bold uppercase tracking-[0.16em] text-cyan-300/80">
+                      ゆらぎ
+                    </p>
+                    <p className="mt-1 font-mono text-sm text-white">
+                      {scanMetrics.fluctuationMs}ms
+                    </p>
+                  </div>
+                  <div className="rounded-xl border border-fuchsia-400/20 bg-fuchsia-500/10 px-3 py-2">
+                    <p className="text-[9px] font-bold uppercase tracking-[0.16em] text-fuchsia-300/80">
+                      脈の強さ
+                    </p>
+                    <p className="mt-1 font-mono text-sm text-white">
+                      {scanMetrics.amplitude}
+                    </p>
+                  </div>
+                </div>
               ) : null}
             </motion.div>
           </div>
