@@ -1,4 +1,5 @@
 import { HomeSessionBlock } from "@/components/HomeSessionBlock";
+import { SleepDataDashboard } from "@/components/SleepDataDashboard";
 import { createClient } from "@/lib/supabase/server";
 
 export default async function Home() {
@@ -31,6 +32,7 @@ export default async function Home() {
         className="w-full max-w-3xl shrink-0"
       />
       <HomeSessionBlock email={email} />
+      <SleepDataDashboard isLoggedIn={email != null} />
     </main>
   );
 }
