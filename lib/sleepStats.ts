@@ -17,8 +17,10 @@ export type DailyWakeScore = {
 
 export type SleepStatsSummary = {
   weekTotalDurationSec: number;
+  weekSessionCount: number;
   topSoundId: string | null;
   topSoundLabel: string;
+  topSoundPlayCount: number;
   avgWakeScore: number | null;
 };
 
@@ -85,12 +87,17 @@ export function buildDailyWakeScores(
   return days;
 }
 
-function modeSoundId(rows: SleepLogStatRow[]): string | null {
-  if (rows.length === 0) return null;
+function soundPlayCounts(rows: SleepLogStatRow[]): Map<string, number> {
   const counts = new Map<string, number>();
   for (const r of rows) {
     counts.set(r.sound_id, (counts.get(r.sound_id) ?? 0) + 1);
   }
+  return counts;
+}
+
+function modeSoundId(
+  counts: Map<string, number>,
+): { id: string | null; count: number } {
   let best: string | null = null;
   let bestCount = 0;
   for (const [id, count] of counts) {
@@ -99,7 +106,7 @@ function modeSoundId(rows: SleepLogStatRow[]): string | null {
       bestCount = count;
     }
   }
-  return best;
+  return { id: best, count: bestCount };
 }
 
 export function buildSleepStats(
@@ -116,7 +123,8 @@ export function buildSleepStats(
     0,
   );
 
-  const topSoundId = modeSoundId(weekRows);
+  const playCounts = soundPlayCounts(weekRows);
+  const { id: topSoundId, count: topSoundPlayCount } = modeSoundId(playCounts);
   const wakeScores = weekRows
     .map((r) => r.wake_score)
     .filter((s) => Number.isFinite(s));
@@ -129,10 +137,12 @@ export function buildSleepStats(
     dailyChart: buildDailyWakeScores(rows, now),
     summary: {
       weekTotalDurationSec,
+      weekSessionCount: weekRows.length,
       topSoundId,
       topSoundLabel: topSoundId
         ? labelForSoundId(topSoundId)
         : "—",
+      topSoundPlayCount,
       avgWakeScore,
     },
   };
@@ -152,7 +162,13 @@ export function formatWakeScoreAvg(avg: number | null): string {
   return avg.toFixed(1);
 }
 
-function buildPreviewRows(now = new Date()): SleepLogRow[] {
+/** 1〜5 を星5個で表示（四捨五入） */
+export function wakeScoreFilledStars(avg: number | null): number {
+  if (avg == null || !Number.isFinite(avg)) return 0;
+  return Math.min(5, Math.max(0, Math.round(avg)));
+}
+
+export function buildPreviewRows(now = new Date()): SleepLogRow[] {
   const today = startOfLocalDay(now);
   const fakeRows: SleepLogRow[] = [];
   const sounds = ["s3", "s2", "s3", "s1", "s3", "s2", "s3"] as const;

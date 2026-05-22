@@ -26,13 +26,19 @@ export default async function Home() {
         <p className="mt-4 text-sm leading-relaxed text-slate-300 sm:text-base">
           オフタイマーと再生ボタンで、時間が来ると音がフェードアウトして止まります。初回はブラウザの許可で音声が有効になります。ログインすると再生開始が記録されます。
         </p>
+        <a
+          href="#sleep-dashboard"
+          className="mt-3 inline-block text-sm font-medium text-violet-300 underline-offset-4 hover:text-violet-200 hover:underline"
+        >
+          ↓ 睡眠データ分析・バランス診断へ
+        </a>
       </div>
       <div
         id="quick-mood-root"
         className="w-full max-w-3xl shrink-0"
       />
-      <HomeSessionBlock email={email} />
       <SleepDataDashboard isLoggedIn={email != null} />
+      <HomeSessionBlock email={email} />
     </main>
   );
 }

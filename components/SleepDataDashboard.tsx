@@ -1,16 +1,23 @@
 "use client";
 
-import type { SleepLogChartPoint } from "@/lib/fetchSleepLogChartData";
+import type {
+  SleepLogChartPoint,
+  SleepLogRow,
+} from "@/lib/fetchSleepLogChartData";
 import {
   buildSleepStats,
   formatDurationJa,
   formatWakeScoreAvg,
   previewSleepLogChartData,
   previewSleepStats,
+  wakeScoreFilledStars,
   type SleepStatsBundle,
+  type SleepStatsSummary,
 } from "@/lib/sleepStats";
+import { SleepBalanceAdvicePanel } from "@/components/SleepBalanceAdvicePanel";
 import { useClientAuth } from "@/hooks/useClientAuth";
 import { useSleepLogChartData } from "@/hooks/useSleepLogChartData";
+import { buildPreviewRows } from "@/lib/sleepStats";
 import Link from "next/link";
 import { useMemo } from "react";
 
@@ -22,144 +29,146 @@ type Props = {
   isLoggedIn: boolean;
 };
 
-function chartPointsToBars(data: SleepLogChartPoint[]) {
-  return data.map((d) => ({
-    label: d.date,
-    wake_score: d.score ?? 0,
-    hasData: d.hasData,
-  }));
-}
-
 function WakeScoreBarChart({ data }: { data: SleepLogChartPoint[] }) {
-  const bars = chartPointsToBars(data);
-  const plotH = 168;
-  const padL = 32;
-  const padB = 32;
-  const padT = 12;
-  const barGap = 8;
-  const width = 360;
+  const ticks = [5, 4, 3, 2, 1, 0];
 
   return (
-    <svg
-      viewBox={`0 0 ${width} ${plotH + padB + padT}`}
-      className="h-full w-full"
+    <div
+      className="flex h-56 w-full flex-col sm:h-60"
       role="img"
       aria-label="過去7日間の目覚めのスッキリ度"
     >
-      <defs>
-        <linearGradient id="barGrad" x1="0" y1="1" x2="0" y2="0">
-          <stop offset="0%" stopColor="#7c3aed" />
-          <stop offset="55%" stopColor="#a855f7" />
-          <stop offset="100%" stopColor={ACCENT_LIME} />
-        </linearGradient>
-        <linearGradient id="barGlow" x1="0" y1="0" x2="1" y2="0">
-          <stop offset="0%" stopColor="#DEFF9A" stopOpacity="0.35" />
-          <stop offset="100%" stopColor="#c084fc" stopOpacity="0.15" />
-        </linearGradient>
-      </defs>
-
-      {[0, 1, 2, 3, 4, 5].map((tick) => {
-        const y = padT + plotH - (tick / CHART_MAX) * plotH;
-        return (
-          <g key={tick}>
-            <line
-              x1={padL}
-              x2={width - 12}
-              y1={y}
-              y2={y}
-              stroke="rgba(148,163,184,0.12)"
-              strokeDasharray="4 4"
-            />
-            <text
-              x={padL - 8}
-              y={y + 4}
-              textAnchor="end"
-              fill="#64748b"
-              fontSize={10}
-            >
-              {tick}
-            </text>
-          </g>
-        );
-      })}
-
-      {bars.map((point, i) => {
-        const n = bars.length || 1;
-        const innerW = width - padL - 16;
-        const slotW = innerW / n;
-        const barW = Math.min(36, slotW - barGap);
-        const cx = padL + slotW * i + slotW / 2;
-        const h = point.hasData
-          ? (point.wake_score / CHART_MAX) * plotH
-          : 0;
-        const x = cx - barW / 2;
-        const y = padT + plotH - h;
-
-        return (
-          <g key={point.label}>
-            {point.hasData ? (
-              <rect
-                x={x - 2}
-                y={y - 2}
-                width={barW + 4}
-                height={Math.max(h + 4, 4)}
-                rx={6}
-                fill="url(#barGlow)"
+      <div className="relative flex min-h-0 flex-1">
+        <div className="flex w-7 shrink-0 flex-col justify-between py-0.5 text-[10px] tabular-nums text-slate-500">
+          {ticks.map((t) => (
+            <span key={t}>{t}</span>
+          ))}
+        </div>
+        <div className="relative flex min-w-0 flex-1 flex-col">
+          <div className="absolute inset-0 bottom-6 flex flex-col justify-between">
+            {ticks.map((t) => (
+              <div
+                key={t}
+                className="border-t border-dashed border-slate-700/40"
               />
-            ) : null}
-            <rect
-              x={x}
-              y={y}
-              width={barW}
-              height={Math.max(h, point.hasData ? 3 : 0)}
-              rx={5}
-              fill={point.hasData ? "url(#barGrad)" : "rgba(51,65,85,0.5)"}
-            >
-              <title>
-                {point.hasData
-                  ? `${point.label}: ${point.wake_score.toFixed(1)} / 5`
-                  : `${point.label}: 記録なし`}
-              </title>
-            </rect>
-            <text
-              x={cx}
-              y={padT + plotH + 20}
-              textAnchor="middle"
-              fill="#94a3b8"
-              fontSize={10}
-            >
-              {point.label}
-            </text>
-          </g>
-        );
-      })}
-    </svg>
+            ))}
+          </div>
+          <div className="relative z-10 flex h-full items-end justify-between gap-1.5 border-b border-slate-600/50 px-1 pb-6 sm:gap-2">
+            {data.map((point) => {
+              const pct = point.hasData
+                ? Math.min(100, ((point.score ?? 0) / CHART_MAX) * 100)
+                : 0;
+              return (
+                <div
+                  key={point.dateKey}
+                  className="flex min-w-0 flex-1 flex-col items-center"
+                  title={
+                    point.hasData
+                      ? `${point.date}: ${point.score?.toFixed(1)} / 5`
+                      : `${point.date}: 記録なし`
+                  }
+                >
+                  <div className="flex h-[148px] w-full max-w-[2.25rem] items-end justify-center sm:max-w-[2.75rem]">
+                    <div
+                      className={`w-[72%] max-w-[2rem] rounded-t-md transition-all ${
+                        point.hasData
+                          ? "bg-gradient-to-t from-violet-600 via-fuchsia-500 to-[#DEFF9A] shadow-[0_0_12px_-2px_rgba(222,255,154,0.35)]"
+                          : "border border-dashed border-slate-600/60 bg-slate-800/40"
+                      }`}
+                      style={{
+                        height: point.hasData
+                          ? `${Math.max(pct, 6)}%`
+                          : "4px",
+                      }}
+                    />
+                  </div>
+                  <span className="mt-2 w-full truncate text-center text-[10px] text-slate-400 sm:text-[11px]">
+                    {point.date}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+    </div>
   );
 }
 
-function SummaryCard({
+function WakeScoreStars({ score }: { score: number | null }) {
+  const filled = wakeScoreFilledStars(score);
+  if (score == null || !Number.isFinite(score)) {
+    return <span className="text-slate-500">—</span>;
+  }
+  return (
+    <span
+      className="inline-flex items-center gap-0.5 text-lg leading-none"
+      aria-label={`スッキリ度 ${score.toFixed(1)} / 5`}
+    >
+      {[1, 2, 3, 4, 5].map((i) => (
+        <span
+          key={i}
+          className={i <= filled ? "text-[#DEFF9A]" : "text-slate-600"}
+        >
+          ★
+        </span>
+      ))}
+    </span>
+  );
+}
+
+function HeroSummaryCard({ summary }: { summary: SleepStatsSummary }) {
+  const sessions = summary.weekSessionCount;
+  const sessionLabel =
+    sessions > 0 ? `今週、${sessions}回のセッション` : "今週のセッションはまだありません";
+
+  return (
+    <div className="relative overflow-hidden rounded-2xl border border-violet-500/25 bg-gradient-to-br from-violet-950/50 via-[#030712] to-fuchsia-950/30 px-5 py-5 sm:px-6 sm:py-6">
+      <div
+        className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_30%_0%,rgba(167,139,250,0.2),transparent_55%)]"
+        aria-hidden
+      />
+      <div className="relative space-y-3">
+        <p className="text-xs font-medium text-violet-200/90">
+          今週のサマリー（月曜〜今日）
+        </p>
+        <p className="text-lg font-semibold text-white sm:text-xl">
+          {sessionLabel}
+        </p>
+        <p
+          className="text-2xl font-bold tabular-nums tracking-tight text-white sm:text-3xl"
+          style={{ textShadow: `0 0 32px ${ACCENT_LIME}44` }}
+        >
+          合計 {formatDurationJa(summary.weekTotalDurationSec)}
+          <span className="ml-2 text-sm font-normal text-slate-400">
+            （タイマー設定）
+          </span>
+        </p>
+        <p className="text-sm text-slate-300">
+          よく聴いた音:{" "}
+          <span className="font-semibold text-white">
+            {summary.topSoundLabel}
+          </span>
+        </p>
+        <p className="text-[11px] leading-relaxed text-slate-500">
+          ※ 再生時間はオフタイマーで選んだ時間の合計です（実際に聴いた時間ではありません）
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function DetailCard({
   title,
-  value,
-  sub,
+  children,
 }: {
   title: string;
-  value: string;
-  sub?: string;
+  children: React.ReactNode;
 }) {
   return (
-    <div className="rounded-2xl border border-white/[0.08] bg-white/[0.04] px-4 py-3.5 backdrop-blur-sm transition hover:border-violet-500/25 hover:bg-white/[0.06]">
-      <p className="text-[10px] font-medium uppercase tracking-[0.2em] text-slate-500">
-        {title}
-      </p>
-      <p
-        className="mt-2 text-xl font-semibold tabular-nums tracking-tight text-white"
-        style={{ textShadow: `0 0 24px ${ACCENT_LIME}33` }}
-      >
-        {value}
-      </p>
-      {sub ? (
-        <p className="mt-1 text-xs text-slate-500">{sub}</p>
-      ) : null}
+    <div className="rounded-2xl border border-white/[0.08] bg-white/[0.04] px-4 py-4 backdrop-blur-sm">
+      <p className="text-xs font-medium text-slate-500">{title}</p>
+      <div className="mt-3">{children}</div>
     </div>
   );
 }
@@ -204,29 +213,45 @@ function DashboardBody({
           </p>
         </div>
       ) : null}
+      {!loading && !error && !isEmpty ? (
+        <>
+          <HeroSummaryCard summary={summary} />
+
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <DetailCard title="スッキリ度">
+              <div className="flex flex-wrap items-center gap-3">
+                <WakeScoreStars score={summary.avgWakeScore} />
+                <span className="text-xl font-semibold tabular-nums text-white">
+                  {formatWakeScoreAvg(summary.avgWakeScore)}
+                </span>
+              </div>
+              <p className="mt-2 text-xs text-slate-500">
+                目覚めのスッキリ度 · 今週の平均
+              </p>
+            </DetailCard>
+
+            <DetailCard title="よく聴く音">
+              <p className="text-xl font-semibold text-white">
+                {summary.topSoundLabel}
+                {summary.topSoundPlayCount > 0 ? (
+                  <span className="ml-2 text-base font-normal text-slate-400">
+                    ({summary.topSoundPlayCount}回)
+                  </span>
+                ) : null}
+              </p>
+              <p className="mt-2 text-xs text-slate-500">今週いちばん多く再生した音源</p>
+            </DetailCard>
+          </div>
+        </>
+      ) : null}
+
       {!loading && !error && !isEmpty && !hasAnyChartData ? (
         <p className="text-center text-xs text-slate-500">
           過去7日間の記録はありません（今週のサマリーのみ表示）
         </p>
       ) : null}
 
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-        <SummaryCard
-          title="今週の合計再生時間"
-          value={formatDurationJa(summary.weekTotalDurationSec)}
-        />
-        <SummaryCard
-          title="よく聴く周波数"
-          value={summary.topSoundLabel}
-          sub={summary.topSoundId ? undefined : "今週の記録なし"}
-        />
-        <SummaryCard
-          title="平均スコア"
-          value={formatWakeScoreAvg(summary.avgWakeScore)}
-          sub="目覚めのスッキリ度 · 今週"
-        />
-      </div>
-
+      {!loading && !error && !isEmpty ? (
       <div className="relative overflow-hidden rounded-2xl border border-white/[0.08] bg-white/[0.03] p-4 sm:p-5">
         <div
           className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_20%_0%,rgba(124,58,237,0.18),transparent_55%)]"
@@ -234,19 +259,21 @@ function DashboardBody({
         />
         <div className="relative">
           <p className="text-[10px] font-bold uppercase tracking-[0.28em] text-slate-500">
-            7-day trend
+            過去7日間の推移
           </p>
-          <h3 className="mt-1 bg-gradient-to-r from-violet-200 via-fuchsia-200 to-[#DEFF9A] bg-clip-text text-base font-semibold text-transparent">
+          <h3 className="mt-1 text-base font-semibold text-violet-100">
             目覚めのスッキリ度（1〜5）
           </h3>
-          <p className="mt-1 text-xs text-slate-500">
-            過去7日間 · 日ごとの平均スコア
+          <p className="mt-1 text-xs text-slate-400">
+            日ごとの平均スコア
           </p>
-          <div className="mt-4 h-52 w-full min-w-0 sm:h-60">
+          <div className="mt-4 w-full min-w-0">
             <WakeScoreBarChart data={chartData} />
           </div>
         </div>
       </div>
+      ) : null}
+
     </div>
   );
 }
@@ -270,15 +297,18 @@ export function SleepDataDashboard({ isLoggedIn: serverLoggedIn }: Props) {
   const displayStats = loggedIn ? loggedInStats : preview;
   const displayChartData = loggedIn ? chartData : previewChart;
   const isEmpty = loggedIn && !loading && rows.length === 0;
-
+  const previewRows = useMemo(() => buildPreviewRows(), []);
+  const adviceRows = loggedIn ? rows : previewRows;
   const displayError =
     loggedIn && (error || warning)
       ? (error ?? warning)
       : null;
 
   return (
+    <div className="flex w-full max-w-3xl flex-col gap-6">
     <section
-      className="relative w-full max-w-3xl overflow-hidden rounded-3xl border border-white/[0.06] p-5 shadow-[0_0_60px_-24px_rgba(124,58,237,0.45)] sm:p-6"
+      id="sleep-dashboard"
+      className="relative w-full scroll-mt-24 rounded-3xl border border-white/[0.06] p-5 shadow-[0_0_60px_-24px_rgba(124,58,237,0.45)] sm:p-6"
       style={{ backgroundColor: SURFACE }}
       aria-labelledby="sleep-data-dashboard-heading"
     >
@@ -289,7 +319,7 @@ export function SleepDataDashboard({ isLoggedIn: serverLoggedIn }: Props) {
 
       <header className="relative mb-6 text-center sm:text-left">
         <p className="text-[10px] font-medium uppercase tracking-[0.28em] text-slate-500">
-          my page
+          マイページ
         </p>
         <h2
           id="sleep-data-dashboard-heading"
@@ -298,7 +328,7 @@ export function SleepDataDashboard({ isLoggedIn: serverLoggedIn }: Props) {
           睡眠データ分析
         </h2>
         <p className="mt-2 text-sm leading-relaxed text-slate-400">
-          再生ログから、週間サマリーとスッキリ度の推移を確認できます。
+          再生ログから傾向を分析し、心と体のバランスに合う周波数を提案します。
         </p>
       </header>
 
@@ -347,6 +377,21 @@ export function SleepDataDashboard({ isLoggedIn: serverLoggedIn }: Props) {
         ) : null}
       </div>
     </section>
+
+    {loggedIn && authReady && !loading ? (
+      <SleepBalanceAdvicePanel rows={adviceRows} preview={false} />
+    ) : null}
+    {!loggedIn ? (
+      <div className="relative">
+        <div className="pointer-events-none select-none blur-sm brightness-90">
+          <SleepBalanceAdvicePanel rows={previewRows} preview />
+        </div>
+        <p className="pointer-events-none absolute inset-0 flex items-center justify-center text-center text-xs text-slate-500">
+          ログインでバランス分析を表示
+        </p>
+      </div>
+    ) : null}
+    </div>
   );
 }
 
