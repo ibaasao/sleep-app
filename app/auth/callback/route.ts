@@ -1,6 +1,6 @@
 import { safeNextPath } from "@/lib/authRedirect";
+import type { CookieToSet } from "@/lib/supabase/cookieTypes";
 import { createServerClient } from "@supabase/ssr";
-import { cookies } from "next/headers";
 import { NextResponse, type NextRequest } from "next/server";
 
 /**
@@ -47,7 +47,7 @@ export async function GET(request: NextRequest) {
       getAll() {
         return request.cookies.getAll();
       },
-      setAll(cookiesToSet) {
+      setAll(cookiesToSet: CookieToSet[]) {
         cookiesToSet.forEach(({ name, value, options }) => {
           response.cookies.set(name, value, options);
         });
