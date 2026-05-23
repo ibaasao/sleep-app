@@ -33,12 +33,18 @@ import {
   type Sound417Settings,
 } from "@/components/Sound417DetailPanel";
 import type { HeartRateSessionPreset } from "@/components/HeartRateTest";
+import { WakeScorePromptModal } from "@/components/WakeScorePromptModal";
+import { notifySleepLogUpdated } from "@/lib/sleepLogEvents";
+import { labelForSoundId } from "@/lib/soundLabels";
+import { saveSleepLog } from "@/lib/saveSleepLog";
+import { formatDurationJa } from "@/lib/sleepStats";
 import { AnimatePresence, motion } from "framer-motion";
 import * as Tone from "tone";
 import {
   SESSION_EVOLVE_REVEAL_MS,
   usePlaybackTimeManager,
 } from "@/hooks/usePlaybackTimeManager";
+import { useBackgroundAudioSession } from "@/hooks/useBackgroundAudioSession";
 
 /** Strict Mode 二重マウントでも心拍プリセット適用が二重起動しないようにする */
 const appliedHeartPresetRequestIds = new Set<number>();
@@ -442,10 +448,42 @@ export type SleepLogNotes = {
 type SleepLogRow = {
   id: string;
   user_id: string;
-  played_at: string;
+  played_at?: string;
   created_at?: string;
   notes?: SleepLogNotes | Record<string, unknown> | null;
+  duration_sec?: number;
+  sound_id?: string;
+  wake_score?: number;
 };
+
+function describeLogEntry(log: SleepLogRow): {
+  title: string;
+  detail: string;
+  at: string;
+} {
+  const atIso = log.created_at ?? log.played_at ?? new Date().toISOString();
+  const at = new Date(atIso).toLocaleString("ja-JP", {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+
+  if (
+    typeof log.sound_id === "string" &&
+    typeof log.duration_sec === "number" &&
+    typeof log.wake_score === "number"
+  ) {
+    return {
+      title: labelForSoundId(log.sound_id),
+      detail: `${formatDurationJa(log.duration_sec)} · スッキリ度 ${log.wake_score}`,
+      at,
+    };
+  }
+
+  const { title, detail } = describeHistoryNotes(log.notes);
+  return { title, detail, at };
+}
 
 function buildNotesPayload(
   sound: Sound,
@@ -495,26 +533,11 @@ function describeHistoryNotes(raw: unknown): {
   };
 }
 
-async function recordSleepLogAtPlay(
-  playedAtIso: string,
-  notes: SleepLogNotes,
-) {
-  const supabase = createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return;
-
-  const { error } = await supabase.from("sleep_logs").insert({
-    user_id: user.id,
-    played_at: playedAtIso,
-    notes,
-  });
-
-  if (error) {
-    console.error("[sleep_logs]", error.message);
-  }
-}
+type PendingSessionLog = {
+  soundId: string;
+  soundLabel: string;
+  startedAt: number;
+};
 
 type SessionControlValue = {
   playing: boolean;
@@ -617,6 +640,11 @@ export function HealingToneButton({
     DEFAULT_SOUND_417_SETTINGS,
   );
   const sound417SettingsRef = useRef<Sound417Settings>(sound417Settings);
+  const pendingSessionRef = useRef<PendingSessionLog | null>(null);
+  const [wakeScorePrompt, setWakeScorePrompt] =
+    useState<PendingSessionLog | null>(null);
+  const [wakeScoreSaving, setWakeScoreSaving] = useState(false);
+  const [wakeScoreSaveMsg, setWakeScoreSaveMsg] = useState<string | null>(null);
 
   const nativeSound417Ref = useRef<Sound417NativeGraph | null>(null);
   const sourceRef = useRef<Tone.Oscillator | Tone.Noise | null>(null);
@@ -734,7 +762,7 @@ export function HealingToneButton({
       .from("sleep_logs")
       .select("*")
       .eq("user_id", user.id)
-      .order("played_at", { ascending: false })
+      .order("created_at", { ascending: false })
       .limit(5);
 
     if (!error && data) {
@@ -743,6 +771,55 @@ export function HealingToneButton({
   }, []);
 
   useEffect(() => {
+    void fetchHistory();
+  }, [fetchHistory]);
+
+  const finalizeSessionEnd = useCallback(() => {
+    const pending = pendingSessionRef.current;
+    pendingSessionRef.current = null;
+    if (!pending) {
+      void fetchHistory();
+      return;
+    }
+    if (!email) {
+      void fetchHistory();
+      return;
+    }
+    setWakeScoreSaveMsg(null);
+    setWakeScorePrompt(pending);
+  }, [email, fetchHistory]);
+
+  const handleWakeScoreSubmit = useCallback(
+    async (wakeScore: number) => {
+      if (!wakeScorePrompt) return;
+      const duration_sec = Math.max(
+        1,
+        Math.round((Date.now() - wakeScorePrompt.startedAt) / 1000),
+      );
+      setWakeScoreSaving(true);
+      setWakeScoreSaveMsg(null);
+      const result = await saveSleepLog(
+        duration_sec,
+        wakeScorePrompt.soundId,
+        wakeScore,
+      );
+      setWakeScoreSaving(false);
+      if (result.ok) {
+        setWakeScorePrompt(null);
+        notifySleepLogUpdated();
+        void fetchHistory();
+        return;
+      }
+      setWakeScoreSaveMsg(
+        result.warning ?? result.error ?? "保存に失敗しました。",
+      );
+    },
+    [wakeScorePrompt, fetchHistory],
+  );
+
+  const handleWakeScoreSkip = useCallback(() => {
+    setWakeScorePrompt(null);
+    setWakeScoreSaveMsg(null);
     void fetchHistory();
   }, [fetchHistory]);
 
@@ -871,8 +948,28 @@ export function HealingToneButton({
     setRemainingSec(null);
     setSyncLocked(false);
     setAlignmentBurstAt(null);
-    void fetchHistory();
-  }, [clearTimers, disposeSources, fetchHistory]);
+    finalizeSessionEnd();
+  }, [clearTimers, disposeSources, finalizeSessionEnd]);
+
+  const stopPlaybackRef = useRef(stopPlayback);
+  stopPlaybackRef.current = stopPlayback;
+
+  useBackgroundAudioSession(playing, {
+    title: currentSound.label,
+    artist: "Sleep Sound",
+    album: currentSound.description,
+    requestWakeLock: false,
+    onResumeAudio: async () => {
+      await Tone.start();
+      const ctx = Tone.getContext();
+      if (ctx.state !== "running") {
+        await ctx.resume();
+      }
+    },
+    onMediaPause: () => {
+      void stopPlaybackRef.current();
+    },
+  });
 
   const beginFadeOut = useCallback(() => {
     if (nativeSound417Ref.current) {
@@ -890,7 +987,7 @@ export function HealingToneButton({
         setRemainingSec(null);
         setSyncLocked(false);
         setAlignmentBurstAt(null);
-        void fetchHistory();
+        finalizeSessionEnd();
       }, FADE_SECONDS * 1000 + 120);
       return;
     }
@@ -916,9 +1013,9 @@ export function HealingToneButton({
       setRemainingSec(null);
       setSyncLocked(false);
       setAlignmentBurstAt(null);
-      void fetchHistory();
+      finalizeSessionEnd();
     }, FADE_SECONDS * 1000 + 120);
-  }, [clearTimers, disposeSources, fetchHistory]);
+  }, [clearTimers, disposeSources, finalizeSessionEnd]);
 
   const startNativeSound417Graph = useCallback(
     async (settings: Sound417Settings, fadeInSec: number) => {
@@ -1070,11 +1167,11 @@ export function HealingToneButton({
     if (sessionSound.id === "s2") {
       await startNativeSound417Graph(sound417Settings, fadeInSec);
 
-      const playedAtIso = new Date().toISOString();
-      void recordSleepLogAtPlay(
-        playedAtIso,
-        buildNotesPayload(sessionSound, sessionMinutes),
-      );
+      pendingSessionRef.current = {
+        soundId: sessionSound.id,
+        soundLabel: sessionSound.label,
+        startedAt: Date.now(),
+      };
 
       endAtRef.current = Date.now() + durationMs;
       setRemainingSec(Math.ceil(durationMs / 1000));
@@ -1346,10 +1443,11 @@ export function HealingToneButton({
       layer.start();
     }
 
-    void recordSleepLogAtPlay(
-      playedAtIso,
-      buildNotesPayload(sessionSound, sessionMinutes),
-    );
+    pendingSessionRef.current = {
+      soundId: sessionSound.id,
+      soundLabel: sessionSound.label,
+      startedAt: Date.now(),
+    };
 
     endAtRef.current = Date.now() + durationMs;
     setRemainingSec(Math.ceil(durationMs / 1000));
@@ -2053,7 +2151,12 @@ export function HealingToneButton({
     animate={{ opacity: playing ? 0 : 1 }}
     transition={{ duration: snap, ease: "easeOut" }}
   >
-    <h1 className="shrink-0 text-lg font-bold sm:text-xl">Sound Library</h1>
+    <h1
+      id="sound-library"
+      className="shrink-0 scroll-mt-28 text-lg font-bold sm:text-xl"
+    >
+      Sound Library
+    </h1>
 
     {selectedId === "s3" && !playing && (
       <div className="relative flex w-full min-w-0 flex-col gap-4 overflow-hidden rounded-2xl border border-cyan-500/25 bg-gradient-to-br from-slate-950/95 via-violet-950/50 to-cyan-950/35 px-4 py-4 shadow-[0_0_48px_-14px_rgba(34,211,238,0.4)] backdrop-blur-md sm:flex-row sm:flex-wrap sm:items-center sm:gap-x-5 sm:gap-y-3 sm:px-5 sm:py-3.5">
@@ -2428,7 +2531,7 @@ export function HealingToneButton({
             <div className="space-y-2">
               {history.length > 0 ? (
                 history.map((log) => {
-                  const { title, detail } = describeHistoryNotes(log.notes);
+                  const { title, detail, at } = describeLogEntry(log);
                   return (
                     <div
                       key={log.id}
@@ -2443,12 +2546,7 @@ export function HealingToneButton({
                         ) : null}
                       </div>
                       <span className="shrink-0 text-xs text-slate-500">
-                        {new Date(log.played_at).toLocaleString("ja-JP", {
-                          month: "short",
-                          day: "numeric",
-                          hour: "2-digit",
-                          minute: "2-digit",
-                        })}
+                        {at}
                       </span>
                     </div>
                   );
@@ -2465,6 +2563,22 @@ export function HealingToneButton({
       </motion.div>
         </motion.div>
       </motion.div>
+      <WakeScorePromptModal
+        open={wakeScorePrompt != null}
+        soundLabel={wakeScorePrompt?.soundLabel ?? ""}
+        durationSec={
+          wakeScorePrompt
+            ? Math.max(
+                1,
+                Math.round((Date.now() - wakeScorePrompt.startedAt) / 1000),
+              )
+            : 0
+        }
+        saving={wakeScoreSaving}
+        saveMessage={wakeScoreSaveMsg}
+        onSubmit={(score) => void handleWakeScoreSubmit(score)}
+        onSkip={handleWakeScoreSkip}
+      />
     </SessionControlContext.Provider>
   );
 }

@@ -5,7 +5,8 @@
   "scripts": {
     "dev": "next dev",
     "dev:turbo": "next dev --turbopack",
-    "build": "next build",
+    "build": "node scripts/generate-pwa-icons.mjs && next build",
+    "pwa:icons": "node scripts/generate-pwa-icons.mjs",
     "start": "next start",
     "lint": "next lint"
   },

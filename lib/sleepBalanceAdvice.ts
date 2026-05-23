@@ -1,4 +1,5 @@
 import type { SleepLogRow } from "@/lib/fetchSleepLogChartData";
+import { buildUnifiedRecommendation } from "@/lib/frequencyRecommendation";
 import { labelForSoundId } from "@/lib/soundLabels";
 import { getSoundWellness } from "@/lib/soundWellness";
 
@@ -170,51 +171,39 @@ function pickRecommendation(
   mindIndex: number,
   bodyIndex: number,
 ): SleepBalanceAdvice["recommendation"] {
-  const SOLFEGGIO_PRIORITY = ["s3", "s2", "s1", "s4", "n7", "n4", "s5", "s6"];
+  const unified = buildUnifiedRecommendation({ sleepLogRows: rows });
+  const w = getSoundWellness(unified.soundId);
 
-  if (stats.length > 0 && stats[0].avgScore >= 3.8 && stats[0].playCount >= 1) {
-    const best = stats[0];
-    const w = getSoundWellness(best.soundId);
-    return {
-      soundId: best.soundId,
-      label: best.label,
-      reason: `履歴では ${best.label} のときのスッキリ度がいちばん高い（平均 ${best.avgScore}）です。`,
-      tip: w.balanceTip,
-    };
-  }
-
+  const reasonParts = [
+    unified.advisoryMessage,
+    ...unified.detailLines,
+  ];
   const diff = mindIndex - bodyIndex;
-  let targetId: string;
   if (diff > 10) {
-    targetId = "n3";
+    reasonParts.push(
+      "加えて、心の指標が体より高めのため、深い休息ノイズとの併用も有効です。",
+    );
   } else if (diff < -10) {
-    targetId = "s4";
-  } else {
-    targetId = "s3";
+    reasonParts.push(
+      "加えて、体の休息寄りの聴き方のため、ソルフェジオで心のケアを補うとよいです。",
+    );
   }
 
-  const tried = new Set(rows.map((r) => r.sound_id));
-  const alt =
-    SOLFEGGIO_PRIORITY.find((id) => !tried.has(id)) ?? targetId;
-  const pick = tried.has(targetId) ? targetId : alt;
-  const w = getSoundWellness(pick);
-
-  let reason: string;
-  if (diff > 10) {
-    reason =
-      "心の指標が体より高めです。深い休息を優先できる音で、体側のバランスを取り戻しましょう。";
-  } else if (diff < -10) {
-    reason =
-      "体の休息寄りの聴き方です。心のつながり・安心感を高める音で、意識のバランスを整えましょう。";
-  } else {
-    reason =
-      "心身のバランスを整える基調音として、修復・調和の周波数がおすすめです。";
+  const topStat = stats[0];
+  if (
+    topStat &&
+    topStat.soundId !== unified.soundId &&
+    topStat.avgScore >= 3.5
+  ) {
+    reasonParts.push(
+      `参考: ${topStat.label} もスッキリ度 ${topStat.avgScore} と好調でした。`,
+    );
   }
 
   return {
-    soundId: pick,
-    label: labelForSoundId(pick),
-    reason,
+    soundId: unified.soundId,
+    label: labelForSoundId(unified.soundId),
+    reason: reasonParts.join(" "),
     tip: w.balanceTip,
   };
 }

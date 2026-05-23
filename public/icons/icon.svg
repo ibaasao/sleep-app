@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Sleep Sound">
+  <defs>
+    <linearGradient id="g" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1e1b4b"/>
+      <stop offset="100%" stop-color="#030712"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="96" fill="url(#g)"/>
+  <circle cx="256" cy="248" r="108" fill="none" stroke="#a78bfa" stroke-width="10" opacity="0.9"/>
+  <circle cx="256" cy="248" r="72" fill="none" stroke="#7dd3fc" stroke-width="6" opacity="0.75"/>
+  <text x="256" y="268" text-anchor="middle" font-family="system-ui,sans-serif" font-size="56" font-weight="700" fill="#DEFF9A">528</text>
+  <text x="256" y="340" text-anchor="middle" font-family="system-ui,sans-serif" font-size="28" fill="#94a3b8">Hz</text>
+</svg>

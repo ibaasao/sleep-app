@@ -278,9 +278,21 @@ export function SleepBalanceAdvicePanel({ rows, preview }: Props) {
           <p className="mt-3 rounded-lg bg-black/25 px-3 py-2 text-xs leading-relaxed text-slate-400">
             {advice.recommendation.tip}
           </p>
-          <p className="mt-3 text-[11px] text-slate-500">
-            上のサウンドライブラリから「{advice.recommendation.label}
-            」を選んでセッションを始めてみてください。
+          <p className="mt-3 text-[11px] leading-relaxed text-slate-500">
+            この分析の
+            <strong className="font-medium text-slate-400">下</strong>
+            にある再生パネル（
+            <a
+              href="#sound-library"
+              className="text-violet-300/90 underline-offset-2 hover:text-violet-200 hover:underline"
+            >
+              Sound Library
+            </a>
+            ）で、カードに表示されている「
+            <span className="font-medium text-slate-400">
+              {advice.recommendation.label}
+            </span>
+            」をタップし、再生ボタンを押して聴き始めてください。
           </p>
         </div>
       ) : null}

@@ -26,12 +26,22 @@ export default async function Home() {
         <p className="mt-4 text-sm leading-relaxed text-slate-300 sm:text-base">
           オフタイマーと再生ボタンで、時間が来ると音がフェードアウトして止まります。初回はブラウザの許可で音声が有効になります。ログインすると再生開始が記録されます。
         </p>
-        <a
-          href="#sleep-dashboard"
-          className="mt-3 inline-block text-sm font-medium text-violet-300 underline-offset-4 hover:text-violet-200 hover:underline"
-        >
-          ↓ 睡眠データ分析・バランス診断へ
-        </a>
+        <div className="mt-3 flex flex-col items-center gap-2 sm:flex-row sm:justify-center sm:gap-4">
+          <a
+            href="#sleep-dashboard"
+            className="text-sm font-medium text-violet-300 underline-offset-4 hover:text-violet-200 hover:underline"
+          >
+            ↓ 睡眠データ分析・バランス診断へ
+          </a>
+          <a
+            href="/binaural"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-sm font-medium text-cyan-300/90 underline-offset-4 hover:text-cyan-200 hover:underline"
+          >
+            バイナルビート専用（別タブ・ログイン不要）↗
+          </a>
+        </div>
       </div>
       <div
         id="quick-mood-root"

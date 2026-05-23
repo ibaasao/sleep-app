@@ -7,6 +7,7 @@ import {
   type SleepLogChartPoint,
   type SleepLogRow,
 } from "@/lib/fetchSleepLogChartData";
+import { SLEEP_LOG_UPDATED_EVENT } from "@/lib/sleepLogEvents";
 import { useCallback, useEffect, useState } from "react";
 
 export type UseSleepLogChartDataState = {
@@ -89,6 +90,15 @@ export function useSleepLogChartData(
       cancelled = true;
     };
   }, [enabled, applyResult]);
+
+  useEffect(() => {
+    if (!enabled) return;
+    const onUpdated = () => {
+      void refetch();
+    };
+    window.addEventListener(SLEEP_LOG_UPDATED_EVENT, onUpdated);
+    return () => window.removeEventListener(SLEEP_LOG_UPDATED_EVENT, onUpdated);
+  }, [enabled, refetch]);
 
   return {
     chartData,

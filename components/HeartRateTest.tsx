@@ -1,5 +1,13 @@
 "use client";
 
+import {
+  fetchSleepLogChartData,
+  type SleepLogRow,
+} from "@/lib/fetchSleepLogChartData";
+import {
+  buildUnifiedRecommendation,
+  type HeartScanMetrics,
+} from "@/lib/frequencyRecommendation";
 import { AnimatePresence, motion } from "framer-motion";
 import { useCallback, useEffect, useRef, useState } from "react";
 
@@ -13,6 +21,9 @@ export type HeartRateSessionPreset = {
   soundId: "s1" | "s2" | "s3" | "s4";
   bpm: number;
   advisoryMessage: string;
+  /** BPM・取得板・スッキリ度ログの統合根拠 */
+  detailLines?: string[];
+  confidence?: "high" | "medium" | "low";
   requestId?: number;
 };
 
@@ -21,67 +32,6 @@ type Phase = "idle" | "measuring" | "result";
 type Props = {
   className?: string;
   onSessionStart?: (preset: HeartRateSessionPreset) => void;
-};
-
-function recommendFromBpm(bpm: number): Omit<HeartRateSessionPreset, "requestId" | "bpm"> {
-  if (bpm >= 85) {
-    return {
-      frequencyHz: 396,
-      soundId: "s1",
-      advisoryMessage:
-        "少し心が興奮状態にあるようです。まずは恐怖や不安を解放し、心をリセットしましょう",
-    };
-  }
-  if (bpm >= 75) {
-    return {
-      frequencyHz: 417,
-      soundId: "s2",
-      advisoryMessage:
-        "今日1日の疲れやマイナスなエネルギーをクリアにして、心身の回復を促します",
-    };
-  }
-  if (bpm >= 60) {
-    return {
-      frequencyHz: 528,
-      soundId: "s3",
-      advisoryMessage:
-        "理想的なリラックス状態です。奇跡の周波数528Hzで細胞から癒やされましょう",
-    };
-  }
-  return {
-    frequencyHz: 639,
-    soundId: "s4",
-    advisoryMessage:
-      "すでに深く落ち着いています。より深い調和とつながりの波動を響かせます",
-  };
-}
-
-function computeBpmFromPeaks(peaks: number[]): {
-  bpm: number;
-  reliable: boolean;
-} {
-  const filtered = [...peaks].sort((a, b) => a - b);
-  if (filtered.length < 2) {
-    return { bpm: 72, reliable: false };
-  }
-  const ivals: number[] = [];
-  for (let i = 1; i < filtered.length; i += 1) {
-    const d = filtered[i] - filtered[i - 1];
-    if (d >= 300 && d <= 2000) ivals.push(d);
-  }
-  if (ivals.length === 0) {
-    return { bpm: 72, reliable: false };
-  }
-  const mean = ivals.reduce((a, b) => a + b, 0) / ivals.length;
-  const bpm = Math.round(60000 / mean);
-  return { bpm: Math.min(220, Math.max(40, bpm)), reliable: true };
-}
-
-type HeartScanMetrics = {
-  bpm: number;
-  fluctuationMs: number;
-  amplitude: number;
-  reliable: boolean;
 };
 
 function computeHeartScanMetrics(
@@ -215,7 +165,7 @@ export function HeartRateTest({ className = "", onSessionStart }: Props) {
     lastPeakTimeRef.current = 0;
   }, [releaseCamera, resetVisualRing]);
 
-  const finishMeasurementWindow = useCallback(() => {
+  const finishMeasurementWindow = useCallback(async () => {
     cancelRaf();
     void releaseCamera();
 
@@ -225,9 +175,27 @@ export function HeartRateTest({ className = "", onSessionStart }: Props) {
     );
     const metrics = computeHeartScanMetrics(peaks, rawSignalsRef.current);
     const { bpm, reliable } = metrics;
-    const rec = recommendFromBpm(bpm);
+
+    let sleepRows: SleepLogRow[] = [];
+    try {
+      const logResult = await fetchSleepLogChartData();
+      if (logResult.ok) sleepRows = logResult.rows;
+    } catch {
+      /* 未ログインなど */
+    }
+
+    const unified = buildUnifiedRecommendation({
+      bpm,
+      scanMetrics: metrics,
+      sleepLogRows: sleepRows,
+    });
+
     const preset: HeartRateSessionPreset = {
-      ...rec,
+      frequencyHz: unified.frequencyHz,
+      soundId: unified.soundId,
+      advisoryMessage: unified.advisoryMessage,
+      detailLines: unified.detailLines,
+      confidence: unified.confidence,
       bpm,
       requestId: Date.now(),
     };
@@ -524,6 +492,24 @@ export function HeartRateTest({ className = "", onSessionStart }: Props) {
                   <p className="mt-3 text-left text-xs leading-relaxed text-slate-300">
                     {resultPreset.advisoryMessage}
                   </p>
+                  {resultPreset.detailLines &&
+                  resultPreset.detailLines.length > 0 ? (
+                    <ul className="mt-3 space-y-1.5 text-left text-[11px] leading-relaxed text-slate-400">
+                      {resultPreset.detailLines.map((line) => (
+                        <li key={line} className="flex gap-1.5">
+                          <span className="text-violet-400" aria-hidden>
+                            ·
+                          </span>
+                          {line}
+                        </li>
+                      ))}
+                    </ul>
+                  ) : null}
+                  {resultPreset.confidence === "low" ? (
+                    <p className="mt-2 text-[10px] text-amber-200/75">
+                      参考度: 低（波形またはログが少ないため）
+                    </p>
+                  ) : null}
                 </>
               ) : null}
               {scanMetrics ? (
