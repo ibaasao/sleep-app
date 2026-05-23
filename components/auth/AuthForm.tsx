@@ -1,7 +1,7 @@
 "use client";
 
 import { signInWithLoginId, signUpWithLoginId } from "@/lib/auth/credentials";
-import { loginIdHint } from "@/lib/auth/loginId";
+import { loginIdHint, sanitizeLoginIdInput } from "@/lib/auth/loginId";
 import Link from "next/link";
 import { type FormEvent, useState } from "react";
 
@@ -23,6 +23,11 @@ export function AuthForm() {
     setMessage(null);
     setLoading(true);
 
+    const id = sanitizeLoginIdInput(loginId);
+    if (id !== loginId) {
+      setLoginId(id);
+    }
+
     if (mode === "register" && password !== passwordConfirm) {
       setLoading(false);
       setMessage("パスワード（確認）が一致しません。");
@@ -31,8 +36,8 @@ export function AuthForm() {
 
     const result =
       mode === "register"
-        ? await signUpWithLoginId(loginId, password)
-        : await signInWithLoginId(loginId, password);
+        ? await signUpWithLoginId(id, password)
+        : await signInWithLoginId(id, password);
 
     setLoading(false);
 
@@ -57,8 +62,8 @@ export function AuthForm() {
             </h1>
             <p className="mt-2 text-sm leading-relaxed text-slate-400">
               {mode === "login"
-                ? "ログインIDとパスワードで、睡眠履歴を引き継ぎます。"
-                : "ログインIDとパスワードを決めて登録します。"}
+                ? "メールアドレス（またはログインID）とパスワードで入れます。"
+                : "ブラウザにおすすめされたメール・パスワードをそのまま使ってOKです。"}
             </p>
           </div>
 
@@ -93,18 +98,26 @@ export function AuthForm() {
             </button>
           </div>
 
-          <form onSubmit={(e) => void onSubmit(e)} className="mt-6 space-y-4">
+          <form
+            onSubmit={(e) => void onSubmit(e)}
+            className="mt-6 space-y-4"
+            autoComplete="on"
+          >
             <label className="block text-sm text-slate-300">
-              ログインID
+              メールアドレス / ログインID
               <input
-                type="text"
+                type="email"
+                name="email"
                 required
-                autoComplete="username"
+                autoComplete="email"
                 autoCapitalize="none"
+                autoCorrect="off"
                 spellCheck={false}
+                inputMode="email"
+                enterKeyHint="next"
                 value={loginId}
                 onChange={(e) => setLoginId(e.target.value)}
-                placeholder="例: taro@mail.com または yamada_taro"
+                placeholder="ibarakiasao4717@gmail.com"
                 className={inputClass}
               />
               <span className="mt-1 block text-xs text-slate-500">
@@ -116,11 +129,13 @@ export function AuthForm() {
               パスワード
               <input
                 type="password"
+                name="password"
                 required
                 minLength={6}
                 autoComplete={
                   mode === "register" ? "new-password" : "current-password"
                 }
+                enterKeyHint="done"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 className={inputClass}
@@ -132,6 +147,7 @@ export function AuthForm() {
                 パスワード（確認）
                 <input
                   type="password"
+                  name="password-confirm"
                   required
                   minLength={6}
                   autoComplete="new-password"
@@ -157,7 +173,7 @@ export function AuthForm() {
 
           {message ? (
             <p
-              className="mt-4 text-center text-sm text-rose-300"
+              className="mt-4 text-center text-sm leading-relaxed text-rose-300"
               role="alert"
             >
               {message}

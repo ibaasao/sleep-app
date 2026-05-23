@@ -1,5 +1,5 @@
 import { createClient } from "@/lib/supabase/client";
-import { resolveAuthIdentity } from "@/lib/auth/loginId";
+import { resolveAuthIdentity, sanitizeLoginIdInput } from "@/lib/auth/loginId";
 
 export type AuthResult =
   | { ok: true }
@@ -37,12 +37,12 @@ export async function signUpWithLoginId(
   loginIdRaw: string,
   password: string,
 ): Promise<AuthResult> {
-  const identity = resolveAuthIdentity(loginIdRaw);
+  const identity = resolveAuthIdentity(sanitizeLoginIdInput(loginIdRaw));
   if (!identity) {
     return {
       ok: false,
       message:
-        "ログインIDはメールアドレス、または3〜24文字の英小文字・数字・アンダースコア（_）で入力してください。",
+        "メールアドレスの形式を確認してください。IDだけ使う場合は英小文字・数字・_ の3〜24文字です。",
     };
   }
   if (password.length < 6) {
@@ -97,11 +97,11 @@ export async function signInWithLoginId(
   loginIdRaw: string,
   password: string,
 ): Promise<AuthResult> {
-  const identity = resolveAuthIdentity(loginIdRaw);
+  const identity = resolveAuthIdentity(sanitizeLoginIdInput(loginIdRaw));
   if (!identity) {
     return {
       ok: false,
-      message: "ログインIDの形式が正しくありません。",
+      message: "メールアドレスまたはログインIDを確認してください。",
     };
   }
 

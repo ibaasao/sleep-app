@@ -1,26 +1,38 @@
-/** ログインIDの正規化 */
+/** ログインIDの正規化（自動入力の空白・不可視文字を除去） */
+export function sanitizeLoginIdInput(raw: string): string {
+  return raw
+    .trim()
+    .replace(/[\u200b-\u200d\ufeff]/g, "")
+    .replace(/\s+/g, "");
+}
+
 export function normalizeLoginId(raw: string): string {
-  return raw.trim().toLowerCase();
+  return sanitizeLoginIdInput(raw).toLowerCase();
 }
 
+/** ブラウザのメール自動入力を広く受け入れる */
 export function isEmailLike(value: string): boolean {
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
+  const v = sanitizeLoginIdInput(value).toLowerCase();
+  const at = v.indexOf("@");
+  if (at < 1) return false;
+  const local = v.slice(0, at);
+  const domain = v.slice(at + 1);
+  if (!local || !domain.includes(".")) return false;
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v) || domain.length >= 4;
 }
 
-/** ユーザー名形式（英小文字・数字・_） */
 export function isUsernameLoginId(loginId: string): boolean {
   return /^[a-z0-9_]{3,24}$/.test(loginId);
 }
 
 export function isValidLoginId(raw: string): boolean {
-  const trimmed = raw.trim();
+  const trimmed = sanitizeLoginIdInput(raw);
   if (isEmailLike(trimmed)) {
     return trimmed.length >= 5 && trimmed.length <= 254;
   }
   return isUsernameLoginId(normalizeLoginId(trimmed));
 }
 
-/** Supabase Auth 用メール（ユーザー名のときのみ内部ドメイン） */
 export function toAuthEmail(username: string): string {
   return `${username}@id.sleep-app.internal`;
 }
@@ -30,9 +42,8 @@ export type AuthIdentity = {
   profileLoginId: string;
 };
 
-/** ログインID → Supabase 用メール & profiles.login_id */
 export function resolveAuthIdentity(raw: string): AuthIdentity | null {
-  const trimmed = raw.trim();
+  const trimmed = sanitizeLoginIdInput(raw);
   if (!trimmed) return null;
 
   if (isEmailLike(trimmed)) {
@@ -50,5 +61,5 @@ export function resolveAuthIdentity(raw: string): AuthIdentity | null {
 }
 
 export function loginIdHint(): string {
-  return "メールアドレス、または 3〜24文字のID（英小文字・数字・_）";
+  return "メールアドレス推奨（ブラウザのおすすめをそのまま使えます）";
 }
