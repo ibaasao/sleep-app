@@ -596,14 +596,14 @@ function SessionControlButton() {
 }
 
 type HealingToneButtonProps = {
-  email: string | null;
+  loginId: string | null;
   /** 心拍テスト OK 後 — 指定サウンドでセッションを自動開始 */
   heartSessionPreset?: HeartRateSessionPreset | null;
   onHeartSessionConsumed?: () => void;
 };
 
 export function HealingToneButton({
-  email,
+  loginId,
   heartSessionPreset,
   onHeartSessionConsumed,
 }: HealingToneButtonProps) {
@@ -781,13 +781,13 @@ export function HealingToneButton({
       void fetchHistory();
       return;
     }
-    if (!email) {
+    if (!loginId) {
       void fetchHistory();
       return;
     }
     setWakeScoreSaveMsg(null);
     setWakeScorePrompt(pending);
-  }, [email, fetchHistory]);
+  }, [loginId, fetchHistory]);
 
   const handleWakeScoreSubmit = useCallback(
     async (wakeScore: number) => {
@@ -2069,7 +2069,7 @@ export function HealingToneButton({
           }}
           transition={{ duration: snap, ease: "easeOut" }}
         >
-          <AuthNav email={email} />
+          <AuthNav loginId={loginId} />
           <SessionControlButton />
         </motion.div>
         <motion.div

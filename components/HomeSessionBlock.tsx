@@ -8,10 +8,10 @@ import {
 import { useCallback, useState } from "react";
 
 type Props = {
-  email: string | null;
+  loginId: string | null;
 };
 
-export function HomeSessionBlock({ email }: Props) {
+export function HomeSessionBlock({ loginId }: Props) {
   const [heartSessionPreset, setHeartSessionPreset] =
     useState<HeartRateSessionPreset | null>(null);
 
@@ -26,7 +26,7 @@ export function HomeSessionBlock({ email }: Props) {
   return (
     <>
       <HealingToneButton
-        email={email}
+        loginId={loginId}
         heartSessionPreset={heartSessionPreset}
         onHeartSessionConsumed={onHeartSessionConsumed}
       />

@@ -5,10 +5,10 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 
 type Props = {
-  email: string | null;
+  loginId: string | null;
 };
 
-export function AuthNav({ email }: Props) {
+export function AuthNav({ loginId }: Props) {
   const router = useRouter();
 
   async function signOut() {
@@ -19,10 +19,10 @@ export function AuthNav({ email }: Props) {
 
   return (
     <nav className="flex flex-wrap items-center justify-center gap-3 text-sm">
-      {email ? (
+      {loginId ? (
         <>
-          <span className="max-w-[220px] truncate text-slate-400" title={email}>
-            {email}
+          <span className="max-w-[220px] truncate text-slate-400" title={loginId}>
+            ID: {loginId}
           </span>
           <button
             type="button"

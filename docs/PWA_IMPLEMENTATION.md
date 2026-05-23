@@ -113,15 +113,11 @@ npm run build   # アイコン生成 + next build
 
 ---
 
-## スマホでログインできないとき
+## ログイン（ログインID + パスワード）
 
-1. **ログイン方法:** スマホは「メール＋パスワード」推奨（メールリンクは Gmail アプリ内ブラウザだとセッションが引き継がれないことが多い）
-2. **Supabase ダッシュボード** → Authentication → URL Configuration:
-   - **Site URL:** `https://あなたの本番ドメイン`
-   - **Redirect URLs:**  
-     `https://あなたの本番ドメイン/auth/callback`  
-     `http://localhost:3000/auth/callback`
-3. **Vercel 環境変数:** `NEXT_PUBLIC_SITE_URL=https://あなたの本番ドメイン`
+- `/login` で新規登録またはログイン
+- Supabase → Authentication → **Email confirmations を OFF** にすると登録直後に使えます
+- `profiles` テーブル用マイグレーション `20250523100000_profiles_login_id.sql` を Supabase に適用してください
 
 ---
 

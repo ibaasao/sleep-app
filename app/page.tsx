@@ -1,18 +1,9 @@
 import { HomeSessionBlock } from "@/components/HomeSessionBlock";
 import { SleepDataDashboard } from "@/components/SleepDataDashboard";
-import { createClient } from "@/lib/supabase/server";
+import { getSessionUser } from "@/lib/auth/getSessionUser";
 
 export default async function Home() {
-  let email: string | null = null;
-  try {
-    const supabase = await createClient();
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-    email = user?.email ?? null;
-  } catch (err) {
-    console.error("[Home] Supabase session unavailable", err);
-  }
+  const sessionUser = await getSessionUser();
 
   return (
     <main className="relative z-10 flex min-h-dvh w-full flex-col items-center justify-start gap-6 px-4 pb-16 pt-8 sm:gap-8 sm:px-6 sm:pb-20 sm:pt-10">
@@ -47,8 +38,8 @@ export default async function Home() {
         id="quick-mood-root"
         className="w-full max-w-3xl shrink-0"
       />
-      <SleepDataDashboard isLoggedIn={email != null} />
-      <HomeSessionBlock email={email} />
+      <SleepDataDashboard isLoggedIn={sessionUser != null} />
+      <HomeSessionBlock loginId={sessionUser?.loginId ?? null} />
     </main>
   );
 }
