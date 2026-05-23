@@ -113,6 +113,18 @@ npm run build   # アイコン生成 + next build
 
 ---
 
+## スマホでログインできないとき
+
+1. **ログイン方法:** スマホは「メール＋パスワード」推奨（メールリンクは Gmail アプリ内ブラウザだとセッションが引き継がれないことが多い）
+2. **Supabase ダッシュボード** → Authentication → URL Configuration:
+   - **Site URL:** `https://あなたの本番ドメイン`
+   - **Redirect URLs:**  
+     `https://あなたの本番ドメイン/auth/callback`  
+     `http://localhost:3000/auth/callback`
+3. **Vercel 環境変数:** `NEXT_PUBLIC_SITE_URL=https://あなたの本番ドメイン`
+
+---
+
 ## 制限（重要）
 
 - **iOS Safari** は画面オフ後に Web Audio を止めることがあります。無音ループ + 復帰時 resume が現実的な上限です。  

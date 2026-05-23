@@ -1,29 +1,44 @@
 "use client";
 
+import { getAuthCallbackUrl } from "@/lib/authRedirect";
 import { createClient } from "@/lib/supabase/client";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { type FormEvent, useState } from "react";
+import { type FormEvent, useEffect, useState } from "react";
+
+function isMobileUa(): boolean {
+  if (typeof navigator === "undefined") return false;
+  return /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+}
 
 export function LoginForm() {
   const searchParams = useSearchParams();
   const error = searchParams.get("error");
+  const errorReason = searchParams.get("reason");
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [mode, setMode] = useState<"magic" | "password">("magic");
+  /** スマホはメールリンクが別ブラウザで開きやすいためパスワードを既定 */
+  const [mode, setMode] = useState<"magic" | "password">("password");
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (isMobileUa()) {
+      setMode("password");
+    }
+  }, []);
 
   async function onSubmitMagic(e: FormEvent) {
     e.preventDefault();
     setLoading(true);
     setMessage(null);
     const supabase = createClient();
+    const redirectTo = getAuthCallbackUrl();
     const { error: err } = await supabase.auth.signInWithOtp({
       email,
       options: {
-        emailRedirectTo: `${window.location.origin}/auth/callback`,
+        emailRedirectTo: redirectTo,
       },
     });
     setLoading(false);
@@ -31,7 +46,9 @@ export function LoginForm() {
       setMessage(err.message);
       return;
     }
-    setMessage("ログイン用のリンクをメールに送りました。受信箱をご確認ください。");
+    setMessage(
+      "ログイン用のリンクをメールに送りました。リンクはこのスマホのブラウザ（Safari / Chrome）で開いてください。Gmail アプリ内ブラウザだとログインできないことがあります。",
+    );
   }
 
   async function onSubmitPassword(e: FormEvent) {
@@ -39,7 +56,7 @@ export function LoginForm() {
     setLoading(true);
     setMessage(null);
     const supabase = createClient();
-    const { error: err } = await supabase.auth.signInWithPassword({
+    const { data, error: err } = await supabase.auth.signInWithPassword({
       email,
       password,
     });
@@ -48,7 +65,14 @@ export function LoginForm() {
       setMessage(err.message);
       return;
     }
-    window.location.href = "/";
+    if (!data.session) {
+      setMessage(
+        "セッションを取得できませんでした。メール確認が必要なアカウントの場合は、受信箱のリンクからログインしてください。",
+      );
+      return;
+    }
+    /** フルリロードでサーバー側 Cookie / ミドルウェアと同期（モバイル向け） */
+    window.location.assign("/");
   }
 
   return (
@@ -62,9 +86,18 @@ export function LoginForm() {
 
       {error === "auth" && (
         <p className="text-center text-sm text-rose-400" role="alert">
-          認証に失敗しました。もう一度お試しください。
+          認証に失敗しました。
+          {errorReason === "exchange" || errorReason === "verify"
+            ? "メールのリンクを、ログインを始めたのと同じブラウザ（Safari 等）で開いてください。"
+            : "もう一度お試しください。スマホでは「メール＋パスワード」が確実です。"}
         </p>
       )}
+
+      {isMobileUa() && mode === "password" ? (
+        <p className="max-w-sm text-center text-xs leading-relaxed text-slate-500">
+          スマホではメールリンクより「メール＋パスワード」でのログインをおすすめします。
+        </p>
+      ) : null}
 
       <div className="flex gap-2 rounded-full bg-slate-800/80 p-1">
         <button
