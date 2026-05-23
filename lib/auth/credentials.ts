@@ -1,10 +1,5 @@
 import { createClient } from "@/lib/supabase/client";
-import {
-  isEmailLike,
-  isValidLoginId,
-  normalizeLoginId,
-  toAuthEmail,
-} from "@/lib/auth/loginId";
+import { resolveAuthIdentity } from "@/lib/auth/loginId";
 
 export type AuthResult =
   | { ok: true }
@@ -15,13 +10,26 @@ function mapAuthError(message: string): string {
   if (m.includes("invalid login credentials")) {
     return "ログインIDまたはパスワードが正しくありません。";
   }
-  if (m.includes("user already registered")) {
-    return "このログインIDは既に使われています。ログインしてください。";
+  if (m.includes("user already registered") || m.includes("already been registered")) {
+    return "このログインIDは既に登録されています。「ログイン」タブから入ってください。";
   }
   if (m.includes("password")) {
     return "パスワードは6文字以上にしてください。";
   }
+  if (m.includes("rate limit")) {
+    return "しばらく待ってから再度お試しください。";
+  }
   return message;
+}
+
+async function upsertProfile(userId: string, loginId: string): Promise<void> {
+  const supabase = createClient();
+  const { error } = await supabase
+    .from("profiles")
+    .upsert({ id: userId, login_id: loginId }, { onConflict: "id" });
+  if (error) {
+    console.warn("[auth] profiles upsert:", error.message);
+  }
 }
 
 /** 新規登録（ログインID + パスワード） */
@@ -29,11 +37,12 @@ export async function signUpWithLoginId(
   loginIdRaw: string,
   password: string,
 ): Promise<AuthResult> {
-  const loginId = normalizeLoginId(loginIdRaw);
-  if (!isValidLoginId(loginId)) {
+  const identity = resolveAuthIdentity(loginIdRaw);
+  if (!identity) {
     return {
       ok: false,
-      message: "ログインIDは3〜24文字の英小文字・数字・アンダースコア（_）のみ使えます。",
+      message:
+        "ログインIDはメールアドレス、または3〜24文字の英小文字・数字・アンダースコア（_）で入力してください。",
     };
   }
   if (password.length < 6) {
@@ -42,10 +51,10 @@ export async function signUpWithLoginId(
 
   const supabase = createClient();
   const { data, error } = await supabase.auth.signUp({
-    email: toAuthEmail(loginId),
+    email: identity.authEmail,
     password,
     options: {
-      data: { login_id: loginId },
+      data: { login_id: identity.profileLoginId },
     },
   });
 
@@ -53,56 +62,62 @@ export async function signUpWithLoginId(
     return { ok: false, message: mapAuthError(error.message) };
   }
 
-  if (!data.session) {
+  if (data.session && data.user) {
+    await upsertProfile(data.user.id, identity.profileLoginId);
+    return { ok: true };
+  }
+
+  // メール確認 OFF でも環境によって session が無いことがある → 即ログインを試す
+  const retry = await supabase.auth.signInWithPassword({
+    email: identity.authEmail,
+    password,
+  });
+
+  if (retry.data.session && retry.data.user) {
+    await upsertProfile(retry.data.user.id, identity.profileLoginId);
+    return { ok: true };
+  }
+
+  if (data.user) {
     return {
       ok: false,
       message:
-        "登録は完了しましたがセッションを開始できませんでした。ログイン画面から入り直してください。",
+        "登録は完了しました。確認メールが届いている場合はリンクを開いてからログインしてください。届かない・すぐ使いたい場合は Supabase の「Confirm email」を OFF にしてください。",
     };
   }
 
-  await supabase.from("profiles").upsert({ id: data.user!.id, login_id: loginId });
-
-  return { ok: true };
+  return {
+    ok: false,
+    message: mapAuthError(retry.error?.message ?? "登録に失敗しました。"),
+  };
 }
 
-/** ログイン（新形式 login_id / 旧形式メールの両方に対応） */
+/** ログイン */
 export async function signInWithLoginId(
   loginIdRaw: string,
   password: string,
 ): Promise<AuthResult> {
-  const trimmed = loginIdRaw.trim();
-  const loginId = normalizeLoginId(trimmed);
+  const identity = resolveAuthIdentity(loginIdRaw);
+  if (!identity) {
+    return {
+      ok: false,
+      message: "ログインIDの形式が正しくありません。",
+    };
+  }
+
   const supabase = createClient();
+  const { data, error } = await supabase.auth.signInWithPassword({
+    email: identity.authEmail,
+    password,
+  });
 
-  const emailsToTry: string[] = [];
-  if (isEmailLike(trimmed)) {
-    emailsToTry.push(trimmed.toLowerCase());
-  } else if (isValidLoginId(loginId)) {
-    emailsToTry.push(toAuthEmail(loginId));
-  } else {
-    return { ok: false, message: "ログインIDの形式が正しくありません。" };
+  if (error || !data.session) {
+    return {
+      ok: false,
+      message: mapAuthError(error?.message ?? "ログインに失敗しました。"),
+    };
   }
 
-  let lastError = "ログインIDまたはパスワードが正しくありません。";
-
-  for (const email of emailsToTry) {
-    const { data, error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
-    if (!error && data.session) {
-      if (isValidLoginId(loginId) && !isEmailLike(trimmed)) {
-        await supabase
-          .from("profiles")
-          .upsert({ id: data.user.id, login_id: loginId }, { onConflict: "id" });
-      }
-      return { ok: true };
-    }
-    if (error) {
-      lastError = mapAuthError(error.message);
-    }
-  }
-
-  return { ok: false, message: lastError };
+  await upsertProfile(data.user.id, identity.profileLoginId);
+  return { ok: true };
 }

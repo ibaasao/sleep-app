@@ -3,8 +3,8 @@ create table if not exists public.profiles (
   id uuid primary key references auth.users (id) on delete cascade,
   login_id text not null,
   created_at timestamptz not null default now(),
-  constraint profiles_login_id_len check (char_length(login_id) >= 3),
-  constraint profiles_login_id_format check (login_id ~ '^[a-z0-9_]+$')
+  constraint profiles_login_id_len check (char_length(login_id) >= 3 and char_length(login_id) <= 254),
+  constraint profiles_login_id_format check (login_id ~ '^[a-z0-9_@.+-]+$')
 );
 
 create unique index if not exists profiles_login_id_unique on public.profiles (login_id);

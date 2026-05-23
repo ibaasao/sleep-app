@@ -3,7 +3,6 @@
 import { signInWithLoginId, signUpWithLoginId } from "@/lib/auth/credentials";
 import { loginIdHint } from "@/lib/auth/loginId";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { type FormEvent, useState } from "react";
 
 type Mode = "login" | "register";
@@ -12,7 +11,6 @@ const inputClass =
   "mt-1.5 w-full rounded-xl border border-white/10 bg-black/40 px-4 py-3 text-base text-white outline-none ring-violet-500/0 transition placeholder:text-slate-600 focus:border-violet-500/50 focus:ring-2 focus:ring-violet-500/30";
 
 export function AuthForm() {
-  const router = useRouter();
   const [mode, setMode] = useState<Mode>("login");
   const [loginId, setLoginId] = useState("");
   const [password, setPassword] = useState("");
@@ -43,8 +41,7 @@ export function AuthForm() {
       return;
     }
 
-    router.push("/");
-    router.refresh();
+    window.location.assign("/");
   }
 
   return (
@@ -107,17 +104,11 @@ export function AuthForm() {
                 spellCheck={false}
                 value={loginId}
                 onChange={(e) => setLoginId(e.target.value)}
-                placeholder="例: yamada_taro"
+                placeholder="例: taro@mail.com または yamada_taro"
                 className={inputClass}
               />
               <span className="mt-1 block text-xs text-slate-500">
                 {loginIdHint()}
-                {mode === "login" ? (
-                  <>
-                    {" "}
-                    · 以前メールで使っていた方は、そのメールアドレスでもログインできます
-                  </>
-                ) : null}
               </span>
             </label>
 
