@@ -1,3 +1,4 @@
+import { getAuthCallbackUrl } from "@/lib/authRedirect";
 import { createClient } from "@/lib/supabase/client";
 import { resolveAuthIdentity, sanitizeLoginIdInput } from "@/lib/auth/loginId";
 
@@ -55,6 +56,7 @@ export async function signUpWithLoginId(
     password,
     options: {
       data: { login_id: identity.profileLoginId },
+      emailRedirectTo: getAuthCallbackUrl(),
     },
   });
 
