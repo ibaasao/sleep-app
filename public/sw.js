@@ -6,6 +6,8 @@
 const CACHE_NAME = "sleep-app-v1";
 const PRECACHE = [
   "/",
+  "/download",
+  "/login",
   "/binaural",
   "/manifest.webmanifest",
   "/icons/icon-192.png",

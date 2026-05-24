@@ -359,7 +359,7 @@ export function SleepDataDashboard({ isLoggedIn: serverLoggedIn }: Props) {
           ) : null}
         </div>
 
-        {!loggedIn ? (
+        {authReady && !loggedIn ? (
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-5 px-6 text-center backdrop-blur-sm">
             <p className="max-w-xs text-base font-medium leading-relaxed text-white sm:text-lg">
               🔑 ログインして睡眠分析を解放
@@ -381,7 +381,7 @@ export function SleepDataDashboard({ isLoggedIn: serverLoggedIn }: Props) {
     {loggedIn && authReady && !loading ? (
       <SleepBalanceAdvicePanel rows={adviceRows} preview={false} />
     ) : null}
-    {!loggedIn ? (
+    {authReady && !loggedIn ? (
       <div className="relative">
         <div className="pointer-events-none select-none blur-sm brightness-90">
           <SleepBalanceAdvicePanel rows={previewRows} preview />

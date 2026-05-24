@@ -1,4 +1,5 @@
 import { PwaRegister } from "@/components/PwaRegister";
+import { SessionKeeper } from "@/components/SessionKeeper";
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
 
@@ -39,6 +40,7 @@ export default function RootLayout({
     <html lang="ja">
       <body className="antialiased">
         {children}
+        <SessionKeeper />
         <PwaRegister />
       </body>
     </html>

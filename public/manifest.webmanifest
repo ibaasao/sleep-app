@@ -3,7 +3,7 @@
   "name": "睡眠改善サウンド",
   "short_name": "Sleep Sound",
   "description": "DNA修復 528Hz・バイナルビート・睡眠ログ",
-  "start_url": "/",
+  "start_url": "/?source=pwa",
   "scope": "/",
   "display": "standalone",
   "orientation": "portrait-primary",
@@ -38,6 +38,12 @@
     }
   ],
   "shortcuts": [
+    {
+      "name": "アプリについて",
+      "short_name": "Download",
+      "url": "/download",
+      "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192" }]
+    },
     {
       "name": "バイナルビート",
       "short_name": "Beats",
