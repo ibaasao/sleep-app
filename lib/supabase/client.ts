@@ -8,5 +8,17 @@ export function createClient() {
       "Supabase の設定がありません（NEXT_PUBLIC_SUPABASE_URL / ANON_KEY）",
     );
   }
-  return createBrowserClient(url, key);
+
+  const isSecure =
+    typeof window !== "undefined"
+      ? window.location.protocol === "https:"
+      : process.env.NODE_ENV === "production";
+
+  return createBrowserClient(url, key, {
+    cookieOptions: {
+      path: "/",
+      sameSite: "lax",
+      secure: isSecure,
+    },
+  });
 }

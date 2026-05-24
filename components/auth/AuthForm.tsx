@@ -1,6 +1,10 @@
 "use client";
 
-import { signInWithLoginId, signUpWithLoginId } from "@/lib/auth/credentials";
+import {
+  finishAuthAndGoHome,
+  signInWithLoginId,
+  signUpWithLoginId,
+} from "@/lib/auth/credentials";
 import { loginIdHint, sanitizeLoginIdInput } from "@/lib/auth/loginId";
 import Link from "next/link";
 import { type FormEvent, useState } from "react";
@@ -46,7 +50,7 @@ export function AuthForm() {
       return;
     }
 
-    window.location.assign("/");
+    await finishAuthAndGoHome();
   }
 
   return (
@@ -63,7 +67,7 @@ export function AuthForm() {
             <p className="mt-2 text-sm leading-relaxed text-slate-400">
               {mode === "login"
                 ? "メールアドレス（またはログインID）とパスワードで入れます。"
-                : "ブラウザにおすすめされたメール・パスワードをそのまま使ってOKです。"}
+                : "メールの確認は不要です。IDとパスワードを決めて登録するだけです。"}
             </p>
           </div>
 
@@ -180,11 +184,11 @@ export function AuthForm() {
             </p>
           ) : null}
 
-          {mode === "register" ? (
-            <p className="mt-4 text-center text-xs leading-relaxed text-slate-500">
-              登録すると睡眠ログの保存・マイページ分析が使えます。
-            </p>
-          ) : null}
+          <p className="mt-4 text-center text-xs leading-relaxed text-slate-500">
+            {mode === "register"
+              ? "確認メールは送りません。登録後そのままログイン状態になります。"
+              : "スマホは Safari / Chrome で開くと安定します。"}
+          </p>
         </div>
 
         <p className="mt-6 text-center">

@@ -2,19 +2,17 @@
 
 import { createClient } from "@/lib/supabase/client";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 
 type Props = {
   loginId: string | null;
 };
 
 export function AuthNav({ loginId }: Props) {
-  const router = useRouter();
 
   async function signOut() {
     const supabase = createClient();
     await supabase.auth.signOut();
-    router.refresh();
+    window.location.href = "/";
   }
 
   return (
